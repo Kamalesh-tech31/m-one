@@ -1,0 +1,6 @@
+{
+  "name": "Maatram Student Lifecycle Platform",
+  "description": "Event-sourced student lifecycle platform tracking the complete Maatram journey from application and verification to mentorship, volunteering, alumni career tracking, and becoming an anchor.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

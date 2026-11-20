@@ -1,0 +1,89 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: 'Manrope', system-ui, -apple-system, sans-serif;
+  --font-display: 'Manrope', system-ui, -apple-system, sans-serif;
+  --font-mono: 'Manrope', system-ui, -apple-system, sans-serif;
+  --tracking-tight: -0.02em;
+}
+
+@layer base {
+  :root {
+    --font-display: 'Manrope', system-ui, -apple-system, sans-serif;
+    --font-sans: 'Manrope', system-ui, -apple-system, sans-serif;
+    --font-mono: 'Manrope', system-ui, -apple-system, sans-serif;
+  }
+
+  html,
+  body {
+    font-family: 'Manrope', system-ui, -apple-system, sans-serif;
+    background-color: #ffffff;
+    color: #0a0a0a;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6,
+  button,
+  input,
+  select,
+  textarea,
+  code,
+  pre,
+  kbd,
+  samp {
+    font-family: inherit;
+  }
+
+  h1,
+  h2,
+  h3,
+  .font-display {
+    font-family: var(--font-display);
+    letter-spacing: -0.02em;
+  }
+
+  .font-mono {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+.section-kicker {
+  font-family: var(--font-sans);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  color: #525252;
+}
+
+.heading-highlight {
+  background-color: #FFC20E;
+  color: #0a0a0a;
+  padding: 0 0.22em;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+.stat-underline {
+  border-bottom: 3px solid #FFC20E;
+  padding-bottom: 2px;
+  display: inline-block;
+}
+
+/* Hide scrollbars cleanly where horizontal scrolling is needed */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
