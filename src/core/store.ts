@@ -39,19 +39,11 @@ export function nextDeterministicEventId(seq: number): string {
   return `EVT-M1-${String(seq).padStart(4, '0')}`;
 }
 
-export interface GuidedDemoState {
-  active: boolean;
-  step: number;
-  autoPlay: boolean;
-  caption: string;
-}
-
 interface MaatramStoreState {
   events: LifecycleEvent[];
   derived: AppState;
   currentUser: AuthSessionUser | null;
   adminOtpVerified: boolean;
-  guidedDemo: GuidedDemoState;
   append: (input: AppendEventInput) => {
     appended: boolean;
     event: LifecycleEvent;
@@ -70,12 +62,7 @@ interface MaatramStoreState {
     eventCountAfter: number;
   };
   simulateOutOfOrder: () => LifecycleEvent;
-  resetToSeed: (options?: { keepSession?: boolean }) => void;
   setAdminOtpVerified: (verified: boolean) => void;
-  startGuidedDemo: () => void;
-  setGuidedDemoStep: (step: number, caption?: string) => void;
-  setGuidedDemoAutoPlay: (autoPlay: boolean) => void;
-  stopGuidedDemo: () => void;
 }
 
 const initialSeed = buildSeedEvents();
@@ -88,12 +75,6 @@ export const useMaatramStore = create<MaatramStoreState>()(
       derived: initialDerived,
       currentUser: null,
       adminOtpVerified: false,
-      guidedDemo: {
-        active: false,
-        step: 0,
-        autoPlay: true,
-        caption: '',
-      },
 
       append: (input) => {
         const currentEvents = get().events;
@@ -158,12 +139,6 @@ export const useMaatramStore = create<MaatramStoreState>()(
         set({
           currentUser: null,
           adminOtpVerified: false,
-          guidedDemo: {
-            active: false,
-            step: 0,
-            autoPlay: false,
-            caption: '',
-          },
         });
       },
 
@@ -284,59 +259,7 @@ export const useMaatramStore = create<MaatramStoreState>()(
         return event;
       },
 
-      resetToSeed: (options) => {
-        const seed = buildSeedEvents();
-        const folded = foldEvents(seed, INITIAL_STATE.workerBookmark);
-        set((s) => ({
-          events: seed,
-          derived: folded,
-          currentUser: options?.keepSession ? s.currentUser : null,
-          adminOtpVerified: options?.keepSession ? s.adminOtpVerified : false,
-          guidedDemo: {
-            active: false,
-            step: 0,
-            autoPlay: true,
-            caption: '',
-          },
-        }));
-      },
-
       setAdminOtpVerified: (verified) => set({ adminOtpVerified: verified }),
-
-      startGuidedDemo: () =>
-        set({
-          guidedDemo: {
-            active: true,
-            step: 0,
-            autoPlay: true,
-            caption:
-              'Step 1 of 5: Applicant (Divya R) — stage stepper and document upload.',
-          },
-        }),
-
-      setGuidedDemoStep: (step, caption) =>
-        set((s) => ({
-          guidedDemo: {
-            ...s.guidedDemo,
-            step,
-            caption: caption ?? s.guidedDemo.caption,
-          },
-        })),
-
-      setGuidedDemoAutoPlay: (autoPlay) =>
-        set((s) => ({
-          guidedDemo: { ...s.guidedDemo, autoPlay },
-        })),
-
-      stopGuidedDemo: () =>
-        set({
-          guidedDemo: {
-            active: false,
-            step: 0,
-            autoPlay: false,
-            caption: '',
-          },
-        }),
     }),
     {
       name: STORAGE_KEY,

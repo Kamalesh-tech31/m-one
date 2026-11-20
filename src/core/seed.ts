@@ -67,7 +67,7 @@ export function buildSeedEvents(): LifecycleEvent[] {
       recordedAt: '2020-06-10T09:00:02.000Z',
       actor: 'Meera Krishnan',
       payload: {
-        email: 'meera.krishnan@maatram-synthetic.edu.in',
+        email: 'meera.krishnan@maatram.demo',
         phone: '+91 98401 11201',
         region: 'Chennai',
         answers: {
@@ -365,7 +365,7 @@ export function buildSeedEvents(): LifecycleEvent[] {
       recordedAt: '2024-06-02T10:00:03.000Z',
       actor: 'Arun K',
       payload: {
-        email: 'arun.k@maatram-synthetic.edu.in',
+        email: 'arun.k@maatram.demo',
         phone: '+91 98402 44101',
         region: 'Chennai',
         answers: {
@@ -1127,17 +1127,17 @@ export function buildSeedEvents(): LifecycleEvent[] {
       },
     },
 
-    // Applicant 7 (2026) — Login Demo Applicant "Divya R" (2026 cycle, draft saved)
+    // Applicant 7 (2026) — Login Demo Applicant "Divya R" (2026 cycle, in tele-verification)
     {
       id: 'EVT-SEED-069D',
-      type: 'APPLICATION_DRAFT_SAVED',
+      type: 'APPLICATION_SUBMITTED',
       personId: 'P-2026-07',
       cycleId: '2026',
       occurredAt: '2026-11-19T12:15:00.000Z',
       recordedAt: '2026-11-19T12:15:02.000Z',
       actor: 'Divya R',
       payload: {
-        email: 'divya.r@maatram-synthetic.edu.in',
+        email: 'divya.r@maatram.demo',
         phone: '+91 98409 20267',
         region: 'Chennai',
         answers: {
@@ -1152,6 +1152,19 @@ export function buildSeedEvents(): LifecycleEvent[] {
           whyMaatram:
             'First-generation computer science aspirant hoping to learn alongside Maatram anchors and give back through school outreach.',
         },
+      },
+    },
+    {
+      id: 'EVT-SEED-069E',
+      type: 'STAGE_ADVANCED',
+      personId: 'P-2026-07',
+      cycleId: '2026',
+      occurredAt: '2026-11-19T13:00:00.000Z',
+      recordedAt: '2026-11-19T13:00:02.000Z',
+      actor: 'Admin (OTP verified)',
+      payload: {
+        stage: 'tele_verification',
+        reason: 'Application submitted and advanced to tele-verification.',
       },
     },
 

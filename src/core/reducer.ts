@@ -559,6 +559,21 @@ export function applyEvent(state: AppState, event: LifecycleEvent): AppState {
         break;
       }
 
+      case 'profile.updated':
+      case 'PROFILE_UPDATED': {
+        const updated: PersonProfile = {
+          ...person,
+          name: (payload.name as string) || person.name,
+          email: (payload.email as string) || person.email,
+          phone: (payload.phone as string) || person.phone,
+          college: (payload.college as string) || person.college,
+          degree: (payload.degree as string) || person.degree,
+          photoUrl: (payload.photoUrl as string) || person.photoUrl,
+        };
+        persons = { ...persons, [event.personId]: updated };
+        break;
+      }
+
       case 'CGPA_RECORDED': {
         const semester = payload.semester as string;
         const gpa = Number(payload.gpa);

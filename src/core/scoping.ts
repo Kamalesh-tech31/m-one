@@ -23,41 +23,37 @@ export const DEMO_ACCOUNTS: Record<UserRole, DemoCredentialAccount> = {
     role: 'applicant',
     personId: 'P-2026-07',
     name: 'Divya R',
-    email: 'divya.r@maatram-synthetic.edu.in',
-    password: 'maatram-applicant',
-    subtitle: '2026 cycle, draft saved',
-    description:
-      '7-question scholarship application, 5 verification document uploads, stage tracker, and workspace join code.',
+    email: 'divya.r@maatram.demo',
+    password: 'Demo@123',
+    subtitle: '2026 cycle, in tele-verification',
+    description: 'Track your application',
   },
   student: {
     role: 'student',
     personId: 'P-2024-01',
     name: 'Arun K',
-    email: 'arun.k@maatram-synthetic.edu.in',
-    password: 'maatram-student',
+    email: 'arun.k@maatram.demo',
+    password: 'Demo@123',
     subtitle: 'B.Tech IT, 4th semester',
-    description:
-      'CGPA progression, difficulty flags, Anchor group meetings & leave requests, volunteering proof, and placement log.',
+    description: 'Learning and volunteering',
   },
   anchor: {
     role: 'anchor',
     personId: 'P-2020-01',
     name: 'Meera Krishnan',
-    email: 'meera.krishnan@maatram-synthetic.edu.in',
-    password: 'maatram-anchor',
+    email: 'meera.krishnan@maatram.demo',
+    password: 'Demo@123',
     subtitle: 'Roster of 15',
-    description:
-      'Manage your 15-scholar cohort, redeem join codes, approve volunteering, review leave, and query Alumni directory.',
+    description: 'Mentor your cohort',
   },
   admin: {
     role: 'admin',
     personId: 'ADMIN',
     name: 'Admin',
-    email: 'admin@maatram-synthetic.edu.in',
-    password: 'maatram-admin',
-    subtitle: 'OTP gate · 123456',
-    description:
-      'Applicant verification, bulk selection, sampled data audits, awards, cycle analytics, settings, and Event Log.',
+    email: 'admin@maatram.demo',
+    password: 'Demo@123',
+    subtitle: 'OTP 123456',
+    description: 'Review and verify',
   },
 };
 
@@ -65,6 +61,56 @@ export interface NavItem {
   id: string;
   path: string;
   label: string;
+  group?: string;
+}
+
+export interface SidebarNavItem {
+  id: string;
+  path: string;
+  label: string;
+  group: string;
+}
+
+export function getSidebarItemsForRole(role: UserRole): SidebarNavItem[] {
+  switch (role) {
+    case 'applicant':
+      return [
+        { id: 'application', path: '/applicant/application', label: 'Application', group: 'Application' },
+        { id: 'form', path: '/applicant/form', label: 'Form', group: 'Application' },
+        { id: 'documents', path: '/applicant/documents', label: 'Documents', group: 'Application' },
+        { id: 'history', path: '/applicant/history', label: 'Status history', group: 'Application' },
+      ];
+    case 'student':
+      return [
+        { id: 'overview', path: '/student/overview', label: 'Overview', group: 'Workspace' },
+        { id: 'volunteering', path: '/student/volunteering', label: 'Volunteering', group: 'Workspace' },
+        { id: 'academics', path: '/student/academics', label: 'Achievements and CGPA', group: 'Workspace' },
+        { id: 'meetings', path: '/student/meetings', label: 'Meetings and announcements', group: 'Workspace' },
+        { id: 'placement', path: '/student/placement', label: 'Placement', group: 'Workspace' },
+        { id: 'help', path: '/student/help', label: 'Get help', group: 'Workspace' },
+      ];
+    case 'anchor':
+      return [
+        { id: 'roster', path: '/anchor/roster', label: 'Roster', group: 'Cohort' },
+        { id: 'announcements', path: '/anchor/announcements', label: 'Announcements', group: 'Cohort' },
+        { id: 'meetings', path: '/anchor/meetings', label: 'Meetings and leave', group: 'Cohort' },
+        { id: 'resources', path: '/anchor/resources', label: 'Resources', group: 'Cohort' },
+        { id: 'approvals', path: '/anchor/approvals', label: 'Volunteering approvals', group: 'Volunteering' },
+        { id: 'requests', path: '/anchor/requests', label: 'Requests inbox', group: 'Volunteering' },
+        { id: 'fee', path: '/anchor/fee', label: 'Anchor fee and receipt', group: 'Contribution' },
+      ];
+    case 'admin':
+      return [
+        { id: 'applicants', path: '/admin/applicants', label: 'Applicants', group: 'Admissions' },
+        { id: 'cycles', path: '/admin/cycles', label: 'Cycles', group: 'Admissions' },
+        { id: 'verification', path: '/admin/verification', label: 'Volunteering verification', group: 'Volunteering' },
+        { id: 'awards', path: '/admin/awards', label: 'Awards', group: 'Operations' },
+        { id: 'sampled', path: '/admin/sampled', label: 'Sampled requests', group: 'Operations' },
+        { id: 'alumni', path: '/admin/alumni', label: 'Alumni career tracker', group: 'People' },
+        { id: 'events', path: '/admin/events', label: 'Audit and Event Log', group: 'System' },
+        { id: 'settings', path: '/admin/settings', label: 'Settings', group: 'System' },
+      ];
+  }
 }
 
 export function getHomeRouteForRole(role: UserRole): string {
@@ -81,23 +127,7 @@ export function getHomeRouteForRole(role: UserRole): string {
 }
 
 export function getNavItemsForRole(role: UserRole): NavItem[] {
-  switch (role) {
-    case 'applicant':
-      return [{ id: 'applicant', path: '/applicant', label: 'My Application' }];
-    case 'student':
-      return [{ id: 'student', path: '/student', label: 'Student Workspace' }];
-    case 'anchor':
-      return [
-        { id: 'anchor', path: '/anchor', label: 'Anchor Workspace' },
-        { id: 'alumni', path: '/alumni', label: 'Alumni Directory' },
-      ];
-    case 'admin':
-      return [
-        { id: 'admin', path: '/admin', label: 'Admin Console' },
-        { id: 'alumni', path: '/alumni', label: 'Alumni Career Tracker' },
-        { id: 'events', path: '/events', label: 'Audit and Event Log' },
-      ];
-  }
+  return getSidebarItemsForRole(role);
 }
 
 export function canAccessRoute(
@@ -105,40 +135,70 @@ export function canAccessRoute(
   pathname: string
 ): boolean {
   if (!user) {
-    return pathname === '/login';
+    return pathname === '/' || pathname === '/login' || pathname.startsWith('/login/');
   }
   const clean = pathname.split('?')[0];
+
+  if (clean === '/profile') {
+    return true;
+  }
+
   switch (user.role) {
     case 'applicant':
-      return clean === '/applicant';
+      return clean === '/applicant' || clean.startsWith('/applicant/');
     case 'student':
-      return clean === '/student';
+      return clean === '/student' || clean.startsWith('/student/');
     case 'anchor':
-      return clean === '/anchor' || clean === '/alumni';
+      return clean === '/anchor' || clean.startsWith('/anchor/');
     case 'admin':
-      return clean === '/admin' || clean === '/alumni' || clean === '/events';
+      return (
+        clean === '/admin' ||
+        clean.startsWith('/admin/') ||
+        clean === '/alumni' ||
+        clean === '/events'
+      );
   }
 }
 
 export function verifyRoleCredentials(
-  role: UserRole,
+  portalRole: UserRole,
   emailInput: string,
   passwordInput: string
 ): { valid: boolean; user?: AuthSessionUser; error?: string } {
-  const account = DEMO_ACCOUNTS[role];
   const email = emailInput.trim().toLowerCase();
   const password = passwordInput.trim();
 
   if (!email) {
-    return { valid: false, error: 'Please enter the synthetic account email.' };
+    return { valid: false, error: 'Please enter your email.' };
   }
   if (!password) {
-    return { valid: false, error: 'Please enter the account password.' };
+    return { valid: false, error: 'Please enter your password.' };
   }
-  if (email !== account.email.toLowerCase() || password !== account.password) {
+
+  // Check if this account belongs to another portal
+  const allRoles: UserRole[] = ['applicant', 'student', 'anchor', 'admin'];
+  const otherRoleMatch = allRoles.find(
+    (r) => r !== portalRole && DEMO_ACCOUNTS[r].email.toLowerCase() === email
+  );
+  if (otherRoleMatch) {
     return {
       valid: false,
-      error: `Invalid credentials for ${role}. Use demo hint (${account.email} / ${account.password}).`,
+      error: 'This account belongs to a different portal',
+    };
+  }
+
+  const account = DEMO_ACCOUNTS[portalRole];
+  if (email !== account.email.toLowerCase()) {
+    return {
+      valid: false,
+      error: 'Invalid email or password.',
+    };
+  }
+
+  if (password !== account.password) {
+    return {
+      valid: false,
+      error: 'Invalid email or password.',
     };
   }
 
@@ -199,7 +259,6 @@ export interface AnchorScopedView {
   openVolunteeringRequests: VolunteeringRequest[];
   sampledRequestsForRoster: SampledDataRequest[];
   ownAnchorApplications: AnchorWillingnessApplication[];
-  alumniDirectory: PersonProfile[];
   nextSeq: number;
 }
 
@@ -362,10 +421,6 @@ export function selectForUser(
       (app) => app.personId === user.personId
     );
 
-    const alumniDirectory = Object.values(state.persons)
-      .filter((p) => p.roles.includes('alumni') || p.careerHistory.length > 0)
-      .sort((a, b) => a.personId.localeCompare(b.personId));
-
     return {
       role: 'anchor',
       ownProfile,
@@ -382,7 +437,6 @@ export function selectForUser(
       openVolunteeringRequests,
       sampledRequestsForRoster,
       ownAnchorApplications,
-      alumniDirectory,
       nextSeq: state.nextSeq,
     };
   }

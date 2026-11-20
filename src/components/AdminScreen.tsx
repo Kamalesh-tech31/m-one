@@ -9,7 +9,6 @@ import {
   KeyRound,
   Lock,
   MapPin,
-  RotateCcw,
   Settings,
   ShieldAlert,
   Users,
@@ -28,6 +27,7 @@ import type { AdminScopedView } from '../core/scoping';
 import type { AppendEventInput } from '../core/store';
 import type {
   AddressVerificationMode,
+  LifecycleEvent,
   SampledRequestType,
 } from '../core/types';
 import {
@@ -35,6 +35,8 @@ import {
   selectSampledCohort,
   verifyAdminOtp,
 } from '../core/validation';
+import { AlumniScreen } from './AlumniScreen';
+import { EventLogScreen } from './EventLogScreen';
 
 interface AdminScreenProps {
   scoped: AdminScopedView;
@@ -42,7 +44,12 @@ interface AdminScreenProps {
   onAppend: (input: AppendEventInput) => void;
   otpVerified: boolean;
   onOtpVerify: (verified: boolean) => void;
-  onResetDemo: () => void;
+  activeTab?: string;
+  onReplayFromStart?: () => void;
+  onReplayFromTime?: (iso: string) => void;
+  onReplayFromBookmark?: () => void;
+  onSimulateDuplicate?: () => { duplicateId: string; eventCountBefore: number; eventCountAfter: number };
+  onSimulateOutOfOrder?: () => LifecycleEvent;
 }
 
 const SAMPLED_REQUEST_TYPES: SampledRequestType[] = [
@@ -58,7 +65,12 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
   onAppend,
   otpVerified,
   onOtpVerify,
-  onResetDemo,
+  activeTab = 'applicants',
+  onReplayFromStart = () => {},
+  onReplayFromTime = () => {},
+  onReplayFromBookmark = () => {},
+  onSimulateDuplicate = () => ({ duplicateId: '', eventCountBefore: 0, eventCountAfter: 0 }),
+  onSimulateOutOfOrder = () => ({} as LifecycleEvent),
 }) => {
   // OTP Gate state
   const [otpInput, setOtpInput] = useState('');
@@ -66,6 +78,7 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
 
   // Filters & Selection
   const [cycleFilter, setCycleFilter] = useState<'all' | '2024' | '2025' | '2026'>('all');
+  const [applicantSearch, setApplicantSearch] = useState('');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [rejectTargetId, setRejectTargetId] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState('');
@@ -99,19 +112,33 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
     setCapSettingInput(String(scoped.rosterCap));
   }, [scoped.rosterCap]);
 
-  const [bannerMsg, setBannerMsg] = useState('');
+  const [toastMsg, setToastMsg] = useState('');
+
+  useEffect(() => {
+    if (toastMsg) {
+      const timer = setTimeout(() => setToastMsg(''), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [toastMsg]);
 
   const allPersons = scoped.allPersons;
 
   const applicantList = useMemo(() => {
     return allPersons.filter((p) => {
       if (cycleFilter !== 'all' && p.cycleId !== cycleFilter) return false;
-      return (
-        p.roles.includes('applicant') ||
-        Boolean(p.applicationSubmittedAt)
-      );
+      const isApp = p.roles.includes('applicant') || Boolean(p.applicationSubmittedAt);
+      if (!isApp) return false;
+      if (applicantSearch.trim()) {
+        const q = applicantSearch.toLowerCase();
+        return (
+          p.name.toLowerCase().includes(q) ||
+          p.personId.toLowerCase().includes(q) ||
+          p.region.toLowerCase().includes(q)
+        );
+      }
+      return true;
     });
-  }, [allPersons, cycleFilter]);
+  }, [allPersons, cycleFilter, applicantSearch]);
 
   const adminVerificationQueue = useMemo(() => {
     return scoped.volunteeringWorks
@@ -157,7 +184,7 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
           b.volunteeringCounts.teleVerifications -
           a.volunteeringCounts.teleVerifications
       )
-      .slice(0, 3);
+      .slice(0, 5);
 
     const topPhysical = [...allPersons]
       .sort(
@@ -165,7 +192,7 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
           b.volunteeringCounts.physicalVerifications -
           a.volunteeringCounts.physicalVerifications
       )
-      .slice(0, 3);
+      .slice(0, 5);
 
     return {
       bestAnchor: anchors[0],
@@ -240,84 +267,78 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
 
   if (!otpVerified) {
     return (
-      <div className="max-w-md mx-auto py-10">
-        <div className="relative pr-2 pb-2">
-          <div
-            aria-hidden="true"
-            className="absolute inset-0 translate-x-2 translate-y-2 bg-[#FFC20E] rounded-2xl"
-          />
-          <section className="relative bg-white border border-neutral-950 rounded-2xl p-6 space-y-5">
-            <div className="flex items-center gap-3 border-b border-neutral-200 pb-4">
-              <span className="w-10 h-10 rounded-xl bg-neutral-950 text-white flex items-center justify-center shrink-0">
-                <Lock className="w-5 h-5" aria-hidden="true" />
-              </span>
-              <div>
-                <p className="section-kicker">GOVERNANCE GATE</p>
-                <h1 className="font-display text-xl font-extrabold text-neutral-950 tracking-[-0.02em]">
-                  Admin <span className="heading-highlight">OTP</span> Verification
-                </h1>
-                <p className="text-xs text-neutral-600">
-                  Audit actor logged as &ldquo;{actorName}&rdquo;
+      <div className="max-w-md mx-auto py-12">
+        <section className="bg-white border border-neutral-200 rounded-2xl p-6 space-y-5 shadow-xs">
+          <div className="flex items-center gap-3 border-b border-neutral-200 pb-4">
+            <span className="w-10 h-10 rounded-xl bg-neutral-950 text-white flex items-center justify-center shrink-0">
+              <Lock className="w-5 h-5" aria-hidden="true" />
+            </span>
+            <div>
+              <p className="section-kicker">GOVERNANCE GATE</p>
+              <h1 className="font-display text-xl font-extrabold text-neutral-950 tracking-[-0.02em]">
+                Admin OTP Verification
+              </h1>
+              <p className="text-xs text-neutral-600">
+                Audit actor logged as &ldquo;{actorName}&rdquo;
+              </p>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-neutral-950 bg-neutral-950 text-white px-4 py-3 text-xs flex items-center justify-between gap-2">
+            <span className="inline-flex items-center gap-1.5">
+              <KeyRound className="w-3.5 h-3.5 text-[#FFC20E]" aria-hidden="true" />
+              <span>Demo OTP hint:</span>
+            </span>
+            <span className="font-bold text-white tracking-[0.08em] tabular-nums">
+              {DEMO_ADMIN_OTP}
+            </span>
+          </div>
+
+          <form onSubmit={handleOtpSubmit} className="space-y-4">
+            <div>
+              <label
+                htmlFor="admin-otp-input"
+                className="block text-xs font-semibold text-neutral-800 mb-1.5"
+              >
+                Enter 6-digit OTP
+              </label>
+              <input
+                id="admin-otp-input"
+                type="text"
+                inputMode="numeric"
+                maxLength={6}
+                value={otpInput}
+                onChange={(e) => {
+                  setOtpInput(e.target.value);
+                  setOtpError('');
+                }}
+                placeholder="123456"
+                className="w-full border border-neutral-300 rounded-lg px-3.5 py-2.5 text-base font-semibold tracking-[0.08em] tabular-nums focus:outline-none focus:ring-2 focus:ring-neutral-950"
+              />
+              {otpError && (
+                <p role="alert" className="text-xs text-red-600 mt-1.5 font-medium">
+                  {otpError}
                 </p>
-              </div>
+              )}
             </div>
 
-            <div className="rounded-xl border border-neutral-950 bg-neutral-950 text-white px-4 py-3 text-xs flex items-center justify-between gap-2">
-              <span className="inline-flex items-center gap-1.5">
-                <KeyRound className="w-3.5 h-3.5 text-[#FFC20E]" aria-hidden="true" />
-                <span>Demo OTP hint:</span>
-              </span>
-              <span className="font-bold text-white tracking-[0.08em] tabular-nums stat-underline">
-                {DEMO_ADMIN_OTP}
-              </span>
+            <div className="flex items-center gap-2">
+              <button
+                type="submit"
+                className="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold bg-[#FFC20E] text-neutral-950 hover:bg-[#e5ae0b] transition-colors"
+              >
+                Verify & Enter Admin
+              </button>
+              <button
+                type="button"
+                onClick={() => setOtpInput(DEMO_ADMIN_OTP)}
+                className="px-3 py-2.5 rounded-xl text-xs font-medium border border-neutral-950 bg-white hover:bg-neutral-50 text-neutral-950"
+              >
+                Fill {DEMO_ADMIN_OTP}
+              </button>
             </div>
-
-            <form onSubmit={handleOtpSubmit} className="space-y-4">
-              <div>
-                <label
-                  htmlFor="admin-otp-input"
-                  className="block text-xs font-semibold text-neutral-800 mb-1.5"
-                >
-                  Enter 6-digit OTP
-                </label>
-                <input
-                  id="admin-otp-input"
-                  type="text"
-                  inputMode="numeric"
-                  maxLength={6}
-                  value={otpInput}
-                  onChange={(e) => {
-                    setOtpInput(e.target.value);
-                    setOtpError('');
-                  }}
-                  placeholder="123456"
-                  className="w-full border border-neutral-300 rounded-lg px-3.5 py-2.5 text-base font-semibold tracking-[0.08em] tabular-nums focus:outline-none focus:ring-2 focus:ring-neutral-950"
-                />
-                {otpError && (
-                  <p role="alert" className="text-xs text-red-600 mt-1.5 font-medium">
-                    {otpError}
-                  </p>
-                )}
-              </div>
-
-              <div className="flex items-center gap-2">
-                <button
-                  type="submit"
-                  className="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold bg-[#FFC20E] text-neutral-950 hover:bg-[#e5ae0b] transition-colors"
-                >
-                  Verify & Enter Admin
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setOtpInput(DEMO_ADMIN_OTP)}
-                  className="px-3 py-2.5 rounded-xl text-xs font-medium border border-neutral-950 bg-white hover:bg-neutral-50 text-neutral-950"
-                >
-                  Fill {DEMO_ADMIN_OTP}
-                </button>
-              </div>
-            </form>
-          </section>
-        </div>
+          </form>
+        </section>
       </div>
     );
   }
@@ -342,7 +363,7 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
         });
       }
     });
-    setBannerMsg(`Shortlisted ${selectedIds.length} applicant(s) as ${actorName}.`);
+    setToastMsg(`Shortlisted ${selectedIds.length} applicant(s).`);
     setSelectedIds([]);
   };
 
@@ -362,7 +383,7 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
         note: `Admin selected "${mode}" after reviewing Address Proof.`,
       },
     });
-    setBannerMsg(`Address verification mode set to "${mode}" for ${person.name}.`);
+    setToastMsg(`Address verification mode set to "${mode}" for ${person.name}.`);
   };
 
   const handleSelectApplicant = (pid: string) => {
@@ -387,9 +408,7 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
         degree: 'Undergraduate Cohort',
       },
     });
-    setBannerMsg(
-      `Selected ${person.name}. Linked student record created with join code ${code} (48h expiry).`
-    );
+    setToastMsg(`Selected ${person.name}. Join code generated.`);
   };
 
   const handleConfirmReject = (e: React.FormEvent) => {
@@ -407,7 +426,7 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
       actor: actorName,
       payload: { reason: rejectReason.trim() },
     });
-    setBannerMsg(`Rejected ${person?.name || rejectTargetId} with recorded reason.`);
+    setToastMsg(`Rejected ${person?.name || rejectTargetId}.`);
     setRejectTargetId(null);
     setRejectReason('');
     setRejectError('');
@@ -436,9 +455,7 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
         sampledPersonIds: sampled,
       },
     });
-    setBannerMsg(
-      `Sampled "${sampleType}" request dispatched to ${sampled.join(', ')} (1 per 25 rule).`
-    );
+    setToastMsg(`Sampled request dispatched to ${sampled.length} scholar(s).`);
   };
 
   const handleSaveFeeSetting = (e: React.FormEvent) => {
@@ -451,7 +468,7 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
       actor: actorName,
       payload: { amount },
     });
-    setBannerMsg(`Anchor yearly renewal fee updated to Rs ${amount.toLocaleString()}.`);
+    setToastMsg(`Anchor renewal fee set to Rs ${amount.toLocaleString()}.`);
   };
 
   const handleSaveCapSetting = (e: React.FormEvent) => {
@@ -464,309 +481,478 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
       actor: actorName,
       payload: { cap },
     });
-    setBannerMsg(`Anchor cohort roster cap updated to ${cap} scholars.`);
+    setToastMsg(`Anchor roster cap updated to ${cap} scholars.`);
   };
+
+  // If sub-route is alumni or events, render those specialized screens directly
+  if (activeTab === 'alumni') {
+    return (
+      <AlumniScreen
+        alumniList={allPersons.filter(
+          (p) => p.roles.includes('alumni') || p.careerHistory.length > 0
+        )}
+        actorName={actorName}
+        readOnly={false}
+        onAppend={onAppend}
+      />
+    );
+  }
+
+  if (activeTab === 'events') {
+    return (
+      <EventLogScreen
+        events={scoped.events}
+        workerBookmark={scoped.workerBookmark}
+        onReplayFromStart={onReplayFromStart}
+        onReplayFromTime={onReplayFromTime}
+        onReplayFromBookmark={onReplayFromBookmark}
+        onSimulateDuplicate={onSimulateDuplicate}
+        onSimulateOutOfOrder={onSimulateOutOfOrder}
+      />
+    );
+  }
 
   return (
     <div className="space-y-8">
-      {/* Admin Header with ONE offset #FFC20E block */}
-      <div className="relative pr-2 pb-2">
-        <div
-          aria-hidden="true"
-          className="absolute inset-0 translate-x-2 translate-y-2 bg-[#FFC20E] rounded-2xl"
-        />
-        <section className="relative bg-white border border-neutral-950 rounded-2xl p-6 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-          <div className="space-y-1.5">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="bg-neutral-950 text-white rounded-full px-3 py-0.5 text-[11px] font-mono uppercase tracking-wider font-semibold">
-                {actorName}
-              </span>
-              <span className="text-xs font-mono tabular-nums text-neutral-600">
-                {adminVerificationQueue.length} pending verifications ·{' '}
-                {scoped.adminFlags.length} anchor flags
-              </span>
-            </div>
-            <h1 className="font-display text-2xl sm:text-3xl font-extrabold text-neutral-950 tracking-[-0.02em]">
-              Admin Operations, <span className="heading-highlight">Verification</span> & Analytics
-            </h1>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="flex items-center gap-1 border border-neutral-200 bg-neutral-50 p-1 rounded-xl">
-              {(['all', '2024', '2025', '2026'] as const).map((cid) => (
-                <button
-                  key={cid}
-                  type="button"
-                  onClick={() => setCycleFilter(cid)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap ${
-                    cycleFilter === cid
-                      ? 'bg-neutral-950 text-white border-b-2 border-[#FFC20E]'
-                      : 'text-neutral-700 hover:text-neutral-950'
-                  }`}
-                >
-                  {cid === 'all' ? 'All Cycles' : `Cycle ${cid}`}
-                </button>
-              ))}
-            </div>
-            <button
-              type="button"
-              onClick={() => onOtpVerify(false)}
-              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-medium border border-neutral-950 bg-white text-neutral-950 hover:bg-neutral-50"
-            >
-              <Lock className="w-3.5 h-3.5" aria-hidden="true" />
-              <span>Lock</span>
-            </button>
-          </div>
-        </section>
-      </div>
-
-      {bannerMsg && (
+      {/* Toast Notification (Fades after 3 seconds) */}
+      {toastMsg && (
         <div
           role="status"
-          className="bg-neutral-950 text-white rounded-xl px-4 py-3 text-sm flex items-center justify-between gap-4"
+          className="fixed bottom-6 right-6 z-50 bg-neutral-950 text-white rounded-xl px-4 py-3 text-sm flex items-center justify-between gap-4 shadow-lg animate-fade-in"
         >
-          <span>{bannerMsg}</span>
+          <span>{toastMsg}</span>
           <button
             type="button"
-            onClick={() => setBannerMsg('')}
-            className="text-xs font-semibold text-white underline shrink-0"
+            onClick={() => setToastMsg('')}
+            className="text-xs font-semibold text-white/80 hover:text-white underline"
           >
             Dismiss
           </button>
         </div>
       )}
 
-      {/* 1. Applicant Review, Address Verification Mode & Bulk Shortlist / Select / Reject */}
-      <section className="bg-white border border-neutral-200 rounded-2xl p-6 space-y-4 shadow-xs">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-neutral-200 pb-3">
-          <div className="flex items-center gap-2">
-            <Users className="w-5 h-5 text-neutral-950" aria-hidden="true" />
+      {/* 1. APPLICANTS TAB */}
+      {activeTab === 'applicants' && (
+        <div className="space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-neutral-200 pb-5">
             <div>
-              <p className="section-kicker">APPLICANT PIPELINE</p>
-              <h2 className="font-display text-lg font-bold text-neutral-950">
-                Applicant Review, Address Mode & Selection
-              </h2>
-              <p className="text-xs text-neutral-600">
-                Once Address Proof is submitted, choose &ldquo;Online panel&rdquo; or &ldquo;Physical verification&rdquo;. All actions log as {actorName}.
+              <h1 className="font-display text-2xl sm:text-3xl font-extrabold text-neutral-950 tracking-[-0.02em]">
+                Applicants
+              </h1>
+              <p className="text-sm text-neutral-600 mt-1">
+                Review applicant pipeline, address verification mode, and selections.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex items-center gap-1 border border-neutral-200 bg-neutral-50 p-1 rounded-xl">
+                {(['all', '2024', '2025', '2026'] as const).map((cid) => (
+                  <button
+                    key={cid}
+                    type="button"
+                    onClick={() => setCycleFilter(cid)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap ${
+                      cycleFilter === cid
+                        ? 'bg-neutral-950 text-white'
+                        : 'text-neutral-700 hover:text-neutral-950'
+                    }`}
+                  >
+                    {cid === 'all' ? 'All Cycles' : `Cycle ${cid}`}
+                  </button>
+                ))}
+              </div>
+              {selectedIds.length > 0 && (
+                <button
+                  type="button"
+                  onClick={handleBulkShortlist}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold bg-[#FFC20E] text-neutral-950 hover:bg-[#e5ae0b] whitespace-nowrap"
+                >
+                  Bulk Shortlist ({selectedIds.length})
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Search row */}
+          <div className="flex items-center gap-3">
+            <input
+              type="text"
+              placeholder="Search applicants by name, ID, or region..."
+              value={applicantSearch}
+              onChange={(e) => setApplicantSearch(e.target.value)}
+              className="w-full sm:max-w-md border border-neutral-300 rounded-lg px-3.5 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-neutral-950"
+            />
+          </div>
+
+          {/* Reject Reason Form Modal/Inline */}
+          {rejectTargetId && (
+            <form
+              onSubmit={handleConfirmReject}
+              className="border border-neutral-950 bg-neutral-50 rounded-xl p-4 space-y-2.5"
+            >
+              <p className="text-sm font-bold text-neutral-950">
+                Reject {scoped.persons[rejectTargetId]?.name || rejectTargetId} — Reason Required
+              </p>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <input
+                  type="text"
+                  aria-label="Rejection reason"
+                  value={rejectReason}
+                  onChange={(e) => {
+                    setRejectReason(e.target.value);
+                    setRejectError('');
+                  }}
+                  placeholder="Enter required reason (visible to Applicant)..."
+                  className="flex-1 border border-neutral-300 rounded-lg px-3 py-2 text-sm bg-white"
+                />
+                <button
+                  type="submit"
+                  className="px-4 py-2 rounded-xl text-xs font-semibold bg-neutral-950 text-white hover:bg-neutral-800 whitespace-nowrap"
+                >
+                  Confirm Rejection
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRejectTargetId(null);
+                    setRejectReason('');
+                    setRejectError('');
+                  }}
+                  className="px-3 py-2 rounded-xl text-xs font-medium border border-neutral-950 bg-white text-neutral-950"
+                >
+                  Cancel
+                </button>
+              </div>
+              {rejectError && (
+                <p className="text-xs text-red-600 font-medium">{rejectError}</p>
+              )}
+            </form>
+          )}
+
+          {/* Applicants Table */}
+          <div className="bg-white border border-neutral-200 rounded-2xl overflow-hidden shadow-xs">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead>
+                  <tr className="border-b border-neutral-200 bg-neutral-50 text-neutral-500 font-semibold">
+                    <th className="py-3 px-4 w-8">Pick</th>
+                    <th className="py-3 px-4">Applicant</th>
+                    <th className="py-3 px-4">Cycle</th>
+                    <th className="py-3 px-4">School & Marks</th>
+                    <th className="py-3 px-4">Address Verification Mode</th>
+                    <th className="py-3 px-4">Stage</th>
+                    <th className="py-3 px-4 text-right">Decision</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-neutral-100">
+                  {applicantList.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="py-8 text-center text-neutral-500">
+                        No applicants found.
+                      </td>
+                    </tr>
+                  ) : (
+                    applicantList.map((p) => {
+                      const isFinal =
+                        p.stage === 'selected' || p.stage === 'rejected';
+                      const hasAddressProof = p.documents.some(
+                        (d) => d.label === 'Address Proof'
+                      );
+                      return (
+                        <tr key={p.personId} className="hover:bg-neutral-50">
+                          <td className="py-3 px-4">
+                            <input
+                              type="checkbox"
+                              aria-label={`Select ${p.name}`}
+                              checked={selectedIds.includes(p.personId)}
+                              onChange={() => toggleCheckbox(p.personId)}
+                            />
+                          </td>
+                          <td className="py-3 px-4">
+                            <p className="font-semibold text-neutral-950">
+                              {p.name}
+                            </p>
+                            <p className="text-[11px] font-mono text-neutral-500">
+                              {p.personId} · {p.region}
+                              {p.shortlisted && ' · Shortlisted'}
+                            </p>
+                          </td>
+                          <td className="py-3 px-4 font-mono tabular-nums">
+                            {p.cycleId}
+                          </td>
+                          <td className="py-3 px-4">
+                            <p className="text-neutral-800">
+                              {p.applicationAnswers.schoolType} ·{' '}
+                              {p.applicationAnswers.twelfthMarks || '—'}
+                            </p>
+                            <p className="text-[11px] text-neutral-500 truncate max-w-[200px]">
+                              {p.applicationAnswers.familyAnnualIncome || '—'}
+                            </p>
+                          </td>
+                          <td className="py-3 px-4">
+                            {hasAddressProof ? (
+                              <select
+                                aria-label={`Address verification mode for ${p.name}`}
+                                value={p.addressVerificationMode || ''}
+                                onChange={(e) => {
+                                  if (e.target.value) {
+                                    handleChooseAddressMode(
+                                      p.personId,
+                                      e.target.value as AddressVerificationMode
+                                    );
+                                  }
+                                }}
+                                className="border border-neutral-300 rounded-lg px-2 py-1 text-xs bg-white"
+                              >
+                                <option value="">Choose mode...</option>
+                                <option value="Online panel">Online panel</option>
+                                <option value="Physical verification">
+                                  Physical verification
+                                </option>
+                              </select>
+                            ) : (
+                              <span className="text-[11px] text-neutral-500">
+                                {p.addressVerificationMode || 'Awaiting Address Proof'}
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-3 px-4">
+                            <span
+                              className={`rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${
+                                p.stage === 'selected'
+                                  ? 'bg-neutral-950 text-white'
+                                  : p.stage === 'rejected'
+                                    ? 'bg-red-100 text-red-900'
+                                    : 'bg-neutral-100 text-neutral-800'
+                              }`}
+                            >
+                              {p.stage.replace('_', ' ')}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4 text-right whitespace-nowrap">
+                            {!isFinal ? (
+                              <div className="inline-flex gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => handleSelectApplicant(p.personId)}
+                                  className="px-3 py-1 rounded-lg text-xs font-semibold bg-neutral-950 text-white hover:bg-neutral-800"
+                                >
+                                  Select
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setRejectTargetId(p.personId);
+                                    setRejectReason('');
+                                    setRejectError('');
+                                  }}
+                                  className="px-3 py-1 rounded-lg text-xs font-medium border border-neutral-950 text-neutral-950 bg-white hover:bg-neutral-50"
+                                >
+                                  Reject
+                                </button>
+                              </div>
+                            ) : p.joinCode ? (
+                              <span className="text-[11px] font-semibold tracking-[0.08em] tabular-nums text-neutral-700">
+                                {p.joinCode}
+                              </span>
+                            ) : (
+                              <span className="text-[11px] text-neutral-500">
+                                Closed
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 2. CYCLES TAB (The ONLY chart in the entire app) */}
+      {activeTab === 'cycles' && (
+        <div className="space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-neutral-200 pb-5">
+            <div>
+              <h1 className="font-display text-2xl sm:text-3xl font-extrabold text-neutral-950 tracking-[-0.02em]">
+                Cycles
+              </h1>
+              <p className="text-sm text-neutral-600 mt-1">
+                Year-over-year admissions trends and cohort conversion rates.
               </p>
             </div>
           </div>
-          <button
-            type="button"
-            disabled={selectedIds.length === 0}
-            onClick={handleBulkShortlist}
-            className="px-4 py-2 rounded-xl text-xs font-semibold bg-neutral-950 text-white hover:bg-neutral-800 disabled:opacity-40 whitespace-nowrap shrink-0"
-          >
-            Bulk Shortlist ({selectedIds.length})
-          </button>
-        </div>
 
-        {rejectTargetId && (
-          <form
-            onSubmit={handleConfirmReject}
-            className="border border-neutral-950 bg-neutral-50 rounded-xl p-4 space-y-2.5"
-          >
-            <p className="text-sm font-bold text-neutral-950">
-              Reject {scoped.persons[rejectTargetId]?.name || rejectTargetId} — Reason Required
-            </p>
-            <div className="flex flex-col sm:flex-row gap-2">
-              <input
-                type="text"
-                aria-label="Rejection reason"
-                value={rejectReason}
-                onChange={(e) => {
-                  setRejectReason(e.target.value);
-                  setRejectError('');
-                }}
-                placeholder="Enter required reason (visible to Applicant)..."
-                className="flex-1 border border-neutral-300 rounded-lg px-3 py-2 text-sm bg-white"
-              />
-              <button
-                type="submit"
-                className="px-4 py-2 rounded-xl text-xs font-semibold bg-neutral-950 text-white hover:bg-neutral-800 whitespace-nowrap"
-              >
-                Confirm Rejection
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setRejectTargetId(null);
-                  setRejectReason('');
-                  setRejectError('');
-                }}
-                className="px-3 py-2 rounded-xl text-xs font-medium border border-neutral-950 bg-white text-neutral-950"
-              >
-                Cancel
-              </button>
-            </div>
-            {rejectError && (
-              <p className="text-xs text-red-600 font-medium">{rejectError}</p>
-            )}
-          </form>
-        )}
-
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
-            <thead>
-              <tr className="border-b border-neutral-200 text-neutral-500">
-                <th className="py-2 pr-3 font-semibold w-8">Pick</th>
-                <th className="py-2 pr-3 font-semibold">Applicant</th>
-                <th className="py-2 pr-3 font-semibold">Cycle</th>
-                <th className="py-2 pr-3 font-semibold">School & Marks</th>
-                <th className="py-2 pr-3 font-semibold">Address Verification Mode</th>
-                <th className="py-2 pr-3 font-semibold">Stage</th>
-                <th className="py-2 font-semibold text-right">Decision</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-neutral-100">
-              {applicantList.map((p) => {
-                const isFinal =
-                  p.stage === 'selected' || p.stage === 'rejected';
-                const hasAddressProof = p.documents.some(
-                  (d) => d.label === 'Address Proof'
-                );
-                return (
-                  <tr key={p.personId} className="hover:bg-neutral-50">
-                    <td className="py-2.5 pr-3">
-                      <input
-                        type="checkbox"
-                        aria-label={`Select ${p.name}`}
-                        checked={selectedIds.includes(p.personId)}
-                        onChange={() => toggleCheckbox(p.personId)}
-                      />
-                    </td>
-                    <td className="py-2.5 pr-3">
-                      <p className="font-semibold text-neutral-950">
-                        {p.name}
-                      </p>
-                      <p className="text-[11px] font-mono text-neutral-500">
-                        {p.personId} · {p.region}
-                        {p.shortlisted && ' · Shortlisted'}
-                      </p>
-                    </td>
-                    <td className="py-2.5 pr-3 font-mono tabular-nums">
-                      {p.cycleId}
-                    </td>
-                    <td className="py-2.5 pr-3">
-                      <p className="text-neutral-800">
-                        {p.applicationAnswers.schoolType} ·{' '}
-                        {p.applicationAnswers.twelfthMarks || '—'}
-                      </p>
-                      <p className="text-[11px] text-neutral-500 truncate max-w-[200px]">
-                        {p.applicationAnswers.familyAnnualIncome || '—'}
-                      </p>
-                    </td>
-                    <td className="py-2.5 pr-3">
-                      {hasAddressProof ? (
-                        <select
-                          aria-label={`Address verification mode for ${p.name}`}
-                          value={p.addressVerificationMode || ''}
-                          onChange={(e) => {
-                            if (e.target.value) {
-                              handleChooseAddressMode(
-                                p.personId,
-                                e.target.value as AddressVerificationMode
-                              );
-                            }
-                          }}
-                          className="border border-neutral-300 rounded-lg px-2 py-1 text-xs bg-white"
-                        >
-                          <option value="">Choose mode...</option>
-                          <option value="Online panel">Online panel</option>
-                          <option value="Physical verification">
-                            Physical verification
-                          </option>
-                        </select>
-                      ) : (
-                        <span className="text-[11px] text-neutral-500">
-                          {p.addressVerificationMode || 'Awaiting Address Proof'}
-                        </span>
-                      )}
-                    </td>
-                    <td className="py-2.5 pr-3">
-                      <span
-                        className={`rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${
-                          p.stage === 'selected'
-                            ? 'bg-neutral-950 text-white'
-                            : p.stage === 'rejected'
-                              ? 'bg-red-100 text-red-900'
-                              : 'bg-neutral-100 text-neutral-800'
-                        }`}
-                      >
-                        {p.stage.replace('_', ' ')}
-                      </span>
-                    </td>
-                    <td className="py-2.5 text-right whitespace-nowrap">
-                      {!isFinal ? (
-                        <div className="inline-flex gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => handleSelectApplicant(p.personId)}
-                            className="px-3 py-1 rounded-lg text-xs font-semibold bg-neutral-950 text-white hover:bg-neutral-800"
-                          >
-                            Select
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setRejectTargetId(p.personId);
-                              setRejectReason('');
-                              setRejectError('');
-                            }}
-                            className="px-3 py-1 rounded-lg text-xs font-medium border border-neutral-950 text-neutral-950 bg-white hover:bg-neutral-50"
-                          >
-                            Reject
-                          </button>
-                        </div>
-                      ) : p.joinCode ? (
-                        <span className="text-[11px] font-semibold tracking-[0.08em] tabular-nums text-neutral-700">
-                          {p.joinCode}
-                        </span>
-                      ) : (
-                        <span className="text-[11px] text-neutral-500">
-                          Closed
-                        </span>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      {/* 2. Volunteering Verification + Yearly Awards Leaderboard */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        <section className="lg:col-span-7 bg-white border border-neutral-200 rounded-2xl p-6 space-y-4 shadow-xs">
-          <div className="flex items-center gap-2 border-b border-neutral-200 pb-3">
-            <ClipboardCheck
-              className="w-5 h-5 text-neutral-950"
-              aria-hidden="true"
-            />
-            <div>
-              <p className="section-kicker">FIELD PROOF REVIEW</p>
+          <section className="bg-white border border-neutral-200 rounded-2xl p-6 space-y-6 shadow-xs">
+            <div className="border-b border-neutral-200 pb-3">
               <h2 className="font-display text-lg font-bold text-neutral-950">
-                Volunteering Verification Queue
+                Multi-Year Cycle Comparison
               </h2>
-              <p className="text-xs text-neutral-600">
+              <p className="text-xs text-neutral-600 mt-0.5">
+                Total applicants (~12,000/year) vs selected scholars (500–700/year) across cycles.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-center">
+              <div className="lg:col-span-7 h-72 w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart
+                    data={yoyData}
+                    margin={{ top: 10, right: 16, left: 4, bottom: 5 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
+                    <XAxis
+                      dataKey="cycleLabel"
+                      tick={{
+                        fill: '#111827',
+                        fontSize: 12,
+                        fontWeight: 600,
+                        fontFamily: "'Manrope', system-ui, sans-serif",
+                      }}
+                    />
+                    <YAxis
+                      tick={{
+                        fill: '#4B5563',
+                        fontSize: 11,
+                        fontWeight: 600,
+                        fontFamily: "'Manrope', system-ui, sans-serif",
+                      }}
+                      tickFormatter={(v) => Number(v).toLocaleString()}
+                    />
+                    <Tooltip
+                      formatter={(value: unknown, name: unknown) => [
+                        Number(value ?? 0).toLocaleString(),
+                        String(name ?? ''),
+                      ]}
+                      contentStyle={{
+                        borderRadius: 8,
+                        border: '1px solid #E5E7EB',
+                        fontSize: 12,
+                        fontFamily: "'Manrope', system-ui, sans-serif",
+                      }}
+                    />
+                    <Legend
+                      wrapperStyle={{
+                        fontSize: 12,
+                        fontWeight: 600,
+                        fontFamily: "'Manrope', system-ui, sans-serif",
+                      }}
+                    />
+                    <Bar
+                      dataKey="applicants"
+                      name="Total Applicants"
+                      fill="#0A0A0A"
+                      radius={[4, 4, 0, 0]}
+                    />
+                    <Bar
+                      dataKey="selected"
+                      name="Selected Scholars"
+                      fill="#FFC20E"
+                      radius={[4, 4, 0, 0]}
+                    />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+
+              <div className="lg:col-span-5 grid grid-cols-1 gap-3">
+                {yoyData.map((row) => (
+                  <div
+                    key={row.cycleId}
+                    className="border border-neutral-200 rounded-xl p-4 flex items-center justify-between gap-3"
+                  >
+                    <div>
+                      <p className="font-display text-sm font-bold text-neutral-950">
+                        {row.cycleLabel}
+                      </p>
+                      <p className="text-xs font-mono tabular-nums text-neutral-600 mt-0.5">
+                        {row.applicants.toLocaleString()} applicants ·{' '}
+                        {row.selected.toLocaleString()} selected
+                      </p>
+                    </div>
+                    <span className="bg-neutral-950 text-white rounded-full px-2.5 py-0.5 text-xs font-mono font-semibold tabular-nums shrink-0">
+                      {row.rate}% rate
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="border-t border-neutral-200 pt-5">
+              <h3 className="text-sm font-bold text-neutral-950 mb-3">
+                Status Change Audit Trail ({statusAuditTrail.length} events)
+              </h3>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead>
+                    <tr className="border-b border-neutral-200 text-neutral-500 font-semibold">
+                      <th className="py-2 pr-3">Seq</th>
+                      <th className="py-2 pr-3">Cycle</th>
+                      <th className="py-2 pr-3">Person</th>
+                      <th className="py-2 pr-3">Transition Event</th>
+                      <th className="py-2 pr-3">Actor</th>
+                      <th className="py-2">Timestamp</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-neutral-100">
+                    {statusAuditTrail.slice(0, 10).map((ev) => (
+                      <tr key={ev.id}>
+                        <td className="py-2 pr-3 font-mono tabular-nums text-neutral-500">
+                          #{ev.seq}
+                        </td>
+                        <td className="py-2 pr-3 font-mono tabular-nums">
+                          {ev.cycleId}
+                        </td>
+                        <td className="py-2 pr-3 font-semibold text-neutral-950">
+                          {scoped.persons[ev.personId]?.name || ev.personId}
+                        </td>
+                        <td className="py-2 pr-3 font-mono text-[11px] text-neutral-800">
+                          {ev.type}
+                        </td>
+                        <td className="py-2 pr-3 text-neutral-600">{ev.actor}</td>
+                        <td className="py-2 font-mono tabular-nums text-neutral-500">
+                          {format(new Date(ev.occurredAt), 'dd MMM yyyy, HH:mm')}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {/* 3. VOLUNTEERING VERIFICATION TAB */}
+      {activeTab === 'verification' && (
+        <div className="space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-neutral-200 pb-5">
+            <div>
+              <h1 className="font-display text-2xl sm:text-3xl font-extrabold text-neutral-950 tracking-[-0.02em]">
+                Volunteering Verification
+              </h1>
+              <p className="text-sm text-neutral-600 mt-1">
                 Inspect field photo proof, read-only location, and timestamp before syncing counts.
               </p>
+            </div>
+            <div className="text-xs font-semibold tabular-nums text-neutral-600">
+              {adminVerificationQueue.length} pending verification(s)
             </div>
           </div>
 
           {adminVerificationQueue.length === 0 ? (
-            <p className="text-xs text-neutral-500 py-4">
+            <div className="bg-white border border-neutral-200 rounded-2xl p-10 text-center text-sm text-neutral-500">
               All volunteering submissions have been verified.
-            </p>
+            </div>
           ) : (
-            <div className="space-y-4">
+            <div className="grid grid-cols-1 gap-4">
               {adminVerificationQueue.map((work) => (
                 <div
                   key={work.workId}
-                  className="border border-neutral-200 rounded-xl overflow-hidden grid grid-cols-1 sm:grid-cols-12"
+                  className="bg-white border border-neutral-200 rounded-2xl overflow-hidden grid grid-cols-1 sm:grid-cols-12 shadow-xs"
                 >
-                  <div className="sm:col-span-5 bg-neutral-100 relative min-h-[160px]">
+                  <div className="sm:col-span-4 bg-neutral-100 relative min-h-[160px]">
                     <img
                       src={work.photoUrl}
                       alt={`Verification proof for ${work.location}`}
@@ -774,8 +960,8 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
                       className="w-full h-full object-cover"
                     />
                   </div>
-                  <div className="sm:col-span-7 p-4 flex flex-col justify-between gap-3">
-                    <div className="space-y-1.5">
+                  <div className="sm:col-span-8 p-5 flex flex-col justify-between gap-4">
+                    <div className="space-y-2">
                       <div className="flex items-center justify-between gap-2">
                         <span className="bg-neutral-950 text-white rounded-full px-2.5 py-0.5 text-[11px] font-semibold">
                           {work.submitterRole === 'anchor'
@@ -786,7 +972,7 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
                           {work.workId}
                         </span>
                       </div>
-                      <p className="text-sm font-bold text-neutral-950">
+                      <p className="text-base font-bold text-neutral-950">
                         {work.personName} · {work.category.replace('_', ' ')}
                       </p>
                       <div className="flex flex-wrap items-center gap-3 text-xs text-neutral-600">
@@ -802,7 +988,10 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
                       <p className="text-xs text-neutral-700">{work.notes}</p>
                     </div>
 
-                    <div className="flex justify-end">
+                    <div className="flex items-center justify-between pt-2 border-t border-neutral-100">
+                      <span className="text-[11px] text-neutral-500 font-medium">
+                        Synced from Volunteer Portal upon verification
+                      </span>
                       <button
                         type="button"
                         onClick={() => {
@@ -816,11 +1005,11 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
                               verifiedBy: actorName,
                             },
                           });
-                          setBannerMsg(
-                            `Verified ${work.workId} for ${work.personName}. Synced to Volunteer Portal & Leaderboard.`
+                          setToastMsg(
+                            `Verified ${work.workId} for ${work.personName}. Counts synced.`
                           );
                         }}
-                        className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-neutral-950 text-white hover:bg-neutral-800"
+                        className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-[#FFC20E] text-neutral-950 hover:bg-[#e5ae0b]"
                       >
                         <CheckCircle2 className="w-3.5 h-3.5" aria-hidden="true" />
                         <span>Verify & Sync Counts</span>
@@ -831,454 +1020,403 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
               ))}
             </div>
           )}
-        </section>
+        </div>
+      )}
 
-        {/* Yearly Awards Leaderboard */}
-        <section className="lg:col-span-5 bg-white border border-neutral-200 rounded-2xl p-6 space-y-4 shadow-xs">
-          <div className="flex items-center gap-2 border-b border-neutral-200 pb-3">
-            <Award className="w-5 h-5 text-neutral-950" aria-hidden="true" />
+      {/* 4. AWARDS TAB (Leaderboard Table, no charts) */}
+      {activeTab === 'awards' && (
+        <div className="space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-neutral-200 pb-5">
             <div>
-              <p className="section-kicker">RECOGNITION</p>
-              <h2 className="font-display text-lg font-bold text-neutral-950">
-                Yearly Awards Leaderboard
-              </h2>
-              <p className="text-xs text-neutral-600">
-                Admin-verified volunteering events + student CGPA growth only
+              <h1 className="font-display text-2xl sm:text-3xl font-extrabold text-neutral-950 tracking-[-0.02em]">
+                Awards
+              </h1>
+              <p className="text-sm text-neutral-600 mt-1">
+                Yearly awards and recognition based on verified work and scholar CGPA growth.
               </p>
             </div>
           </div>
 
-          <div className="space-y-3">
-            <div className="border border-neutral-950 bg-neutral-950 text-white rounded-xl p-4 space-y-1">
-              <p className="text-[11px] font-mono uppercase tracking-wider text-neutral-400">
-                Best Anchor (Verified Work + Student CGPA Growth)
-              </p>
-              <p className="text-base font-bold stat-underline">
-                {leaderboard.bestAnchor?.name || '—'}
-              </p>
-              <p className="text-xs font-mono tabular-nums text-neutral-300 pt-1">
-                Score {leaderboard.bestAnchor?.score || 0} ·{' '}
-                {leaderboard.bestAnchor?.verifiedTotal || 0} verified works · +
-                {(leaderboard.bestAnchor?.totalCgpaGrowth || 0).toFixed(2)} CGPA growth across{' '}
-                {leaderboard.bestAnchor?.menteeCount || 0} scholars
-              </p>
-            </div>
-
-            <div className="border border-neutral-200 rounded-xl p-3.5 space-y-2">
-              <p className="text-xs font-bold text-neutral-950">
-                Most Verified Tele-Verifications
-              </p>
-              <ul className="divide-y divide-neutral-100 text-xs">
-                {leaderboard.topTele.map((p, idx) => (
-                  <li
-                    key={p.personId}
-                    className="py-1.5 flex items-center justify-between"
-                  >
-                    <span>
-                      {idx + 1}. {p.name}
-                    </span>
-                    <span className="font-mono font-bold tabular-nums">
-                      {p.volunteeringCounts.teleVerifications}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-
-            <div className="border border-neutral-200 rounded-xl p-3.5 space-y-2">
-              <p className="text-xs font-bold text-neutral-950">
-                Most Verified Physical Verifications
-              </p>
-              <ul className="divide-y divide-neutral-100 text-xs">
-                {leaderboard.topPhysical.map((p, idx) => (
-                  <li
-                    key={p.personId}
-                    className="py-1.5 flex items-center justify-between"
-                  >
-                    <span>
-                      {idx + 1}. {p.name}
-                    </span>
-                    <span className="font-mono font-bold tabular-nums">
-                      {p.volunteeringCounts.physicalVerifications}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          </div>
-        </section>
-      </div>
-
-      {/* 3. Sampled Requests (Primary Yellow CTA) + Admin Settings (Fee, Roster Cap, Reset Demo) + Escalations */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        <div className="lg:col-span-6 space-y-6">
-          <section className="bg-white border border-neutral-200 rounded-2xl p-6 space-y-4 shadow-xs">
-            <div className="border-b border-neutral-200 pb-3">
-              <p className="section-kicker">AUDIT SAMPLING</p>
-              <h2 className="font-display text-lg font-bold text-neutral-950 mt-0.5">
-                Create Sampled Data Request (1 per 25 · with Deadline)
-              </h2>
-              <p className="text-xs text-neutral-600">
-                Samples 1 scholar per 25 across the cohort across 4 structured audit types.
-              </p>
-            </div>
-            <form onSubmit={handleCreateSampledRequest} className="space-y-3">
-              <div>
-                <label
-                  htmlFor="sample-type-select"
-                  className="block text-xs font-semibold text-neutral-700 mb-1"
-                >
-                  Sampled Request Type
-                </label>
-                <select
-                  id="sample-type-select"
-                  value={sampleType}
-                  onChange={(e) => {
-                    const nextType = e.target.value as SampledRequestType;
-                    setSampleType(nextType);
-                    setSampleTitle(`${nextType} Audit (Sample 1 per 25)`);
-                  }}
-                  className="w-full border border-neutral-300 rounded-lg px-3 py-2 text-sm bg-white"
-                >
-                  {SAMPLED_REQUEST_TYPES.map((t) => (
-                    <option key={t} value={t}>
-                      {t}
-                    </option>
-                  ))}
-                </select>
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+            <section className="lg:col-span-7 bg-white border border-neutral-200 rounded-2xl p-6 space-y-4 shadow-xs">
+              <div className="flex items-center gap-2 border-b border-neutral-200 pb-3">
+                <Award className="w-5 h-5 text-neutral-950" aria-hidden="true" />
+                <div>
+                  <h2 className="font-display text-base font-bold text-neutral-950">
+                    Anchor Leadership Rankings
+                  </h2>
+                  <p className="text-xs text-neutral-600">
+                    Ranked by verified volunteering points + scholar CGPA growth.
+                  </p>
+                </div>
               </div>
-              <input
-                type="text"
-                aria-label="Sampled request title"
-                value={sampleTitle}
-                onChange={(e) => setSampleTitle(e.target.value)}
-                className="w-full border border-neutral-300 rounded-lg px-3 py-2 text-sm"
-              />
-              <textarea
-                rows={2}
-                aria-label="Sampled request prompt"
-                value={samplePrompt}
-                onChange={(e) => setSamplePrompt(e.target.value)}
-                className="w-full border border-neutral-300 rounded-lg px-3 py-2 text-sm"
-              />
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
+
+              {leaderboard.bestAnchor && (
+                <div className="border border-neutral-950 bg-neutral-950 text-white rounded-xl p-4 space-y-1">
+                  <p className="text-[11px] font-mono uppercase tracking-wider text-[#FFC20E] font-semibold">
+                    Best Anchor Award
+                  </p>
+                  <p className="text-base font-bold">
+                    {leaderboard.bestAnchor.name}
+                  </p>
+                  <p className="text-xs font-mono tabular-nums text-neutral-300 pt-1">
+                    Score {leaderboard.bestAnchor.score} ·{' '}
+                    {leaderboard.bestAnchor.verifiedTotal} verified works · +
+                    {(leaderboard.bestAnchor.totalCgpaGrowth || 0).toFixed(2)} CGPA growth across{' '}
+                    {leaderboard.bestAnchor.menteeCount} scholars
+                  </p>
+                </div>
+              )}
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead>
+                    <tr className="border-b border-neutral-200 text-neutral-500 font-semibold">
+                      <th className="py-2 pr-3">Rank</th>
+                      <th className="py-2 pr-3">Anchor</th>
+                      <th className="py-2 pr-3">Region</th>
+                      <th className="py-2 pr-3">Verified Works</th>
+                      <th className="py-2 pr-3">Scholars</th>
+                      <th className="py-2 font-semibold text-right">Score</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-neutral-100">
+                    {leaderboard.anchors.map((a, idx) => (
+                      <tr key={a.personId} className="hover:bg-neutral-50">
+                        <td className="py-2.5 pr-3 font-mono font-bold text-neutral-950">
+                          #{idx + 1}
+                        </td>
+                        <td className="py-2.5 pr-3 font-semibold text-neutral-950">
+                          {a.name}
+                        </td>
+                        <td className="py-2.5 pr-3 text-neutral-600">{a.region}</td>
+                        <td className="py-2.5 pr-3 font-mono tabular-nums text-neutral-800">
+                          {a.verifiedTotal}
+                        </td>
+                        <td className="py-2.5 pr-3 font-mono tabular-nums text-neutral-800">
+                          {a.menteeCount}
+                        </td>
+                        <td className="py-2.5 text-right font-mono font-bold tabular-nums text-neutral-950">
+                          {a.score}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <div className="lg:col-span-5 space-y-6">
+              <section className="bg-white border border-neutral-200 rounded-2xl p-6 space-y-3 shadow-xs">
+                <h3 className="text-sm font-bold text-neutral-950">
+                  Most Verified Tele-Verifications
+                </h3>
+                <ul className="divide-y divide-neutral-100 text-xs">
+                  {leaderboard.topTele.map((p, idx) => (
+                    <li
+                      key={p.personId}
+                      className="py-2 flex items-center justify-between"
+                    >
+                      <span className="text-neutral-800">
+                        {idx + 1}. {p.name}
+                      </span>
+                      <span className="font-mono font-bold tabular-nums text-neutral-950">
+                        {p.volunteeringCounts.teleVerifications}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+
+              <section className="bg-white border border-neutral-200 rounded-2xl p-6 space-y-3 shadow-xs">
+                <h3 className="text-sm font-bold text-neutral-950">
+                  Most Verified Physical Verifications
+                </h3>
+                <ul className="divide-y divide-neutral-100 text-xs">
+                  {leaderboard.topPhysical.map((p, idx) => (
+                    <li
+                      key={p.personId}
+                      className="py-2 flex items-center justify-between"
+                    >
+                      <span className="text-neutral-800">
+                        {idx + 1}. {p.name}
+                      </span>
+                      <span className="font-mono font-bold tabular-nums text-neutral-950">
+                        {p.volunteeringCounts.physicalVerifications}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 5. SAMPLED REQUESTS TAB */}
+      {activeTab === 'sampled' && (
+        <div className="space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-neutral-200 pb-5">
+            <div>
+              <h1 className="font-display text-2xl sm:text-3xl font-extrabold text-neutral-950 tracking-[-0.02em]">
+                Sampled Requests
+              </h1>
+              <p className="text-sm text-neutral-600 mt-1">
+                Sample 1 scholar per 25 across the cohort across 4 structured audit types.
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+            <section className="lg:col-span-7 bg-white border border-neutral-200 rounded-2xl p-6 space-y-4 shadow-xs">
+              <div className="border-b border-neutral-200 pb-3">
+                <h2 className="font-display text-base font-bold text-neutral-950">
+                  Create Sampled Request (1 per 25)
+                </h2>
+                <p className="text-xs text-neutral-600 mt-0.5">
+                  Automatically selects a random subset of scholars with a defined submission deadline.
+                </p>
+              </div>
+
+              <form onSubmit={handleCreateSampledRequest} className="space-y-3">
+                <div>
                   <label
-                    htmlFor="sample-deadline"
-                    className="text-xs font-medium text-neutral-600"
+                    htmlFor="sample-type-select"
+                    className="block text-xs font-semibold text-neutral-700 mb-1"
                   >
-                    Deadline
+                    Sampled Request Type
+                  </label>
+                  <select
+                    id="sample-type-select"
+                    value={sampleType}
+                    onChange={(e) => {
+                      const nextType = e.target.value as SampledRequestType;
+                      setSampleType(nextType);
+                      setSampleTitle(`${nextType} Audit (Sample 1 per 25)`);
+                    }}
+                    className="w-full border border-neutral-300 rounded-lg px-3 py-2 text-sm bg-white"
+                  >
+                    {SAMPLED_REQUEST_TYPES.map((t) => (
+                      <option key={t} value={t}>
+                        {t}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label
+                    htmlFor="sample-title-input"
+                    className="block text-xs font-semibold text-neutral-700 mb-1"
+                  >
+                    Title
                   </label>
                   <input
-                    id="sample-deadline"
-                    type="date"
-                    value={sampleDeadline}
-                    onChange={(e) => setSampleDeadline(e.target.value)}
-                    className="border border-neutral-300 rounded-lg px-2.5 py-1.5 text-xs font-mono"
+                    id="sample-title-input"
+                    type="text"
+                    value={sampleTitle}
+                    onChange={(e) => setSampleTitle(e.target.value)}
+                    className="w-full border border-neutral-300 rounded-lg px-3 py-2 text-sm"
                   />
                 </div>
+                <div>
+                  <label
+                    htmlFor="sample-prompt-input"
+                    className="block text-xs font-semibold text-neutral-700 mb-1"
+                  >
+                    Instructions / Prompt
+                  </label>
+                  <textarea
+                    id="sample-prompt-input"
+                    rows={2}
+                    value={samplePrompt}
+                    onChange={(e) => setSamplePrompt(e.target.value)}
+                    className="w-full border border-neutral-300 rounded-lg px-3 py-2 text-sm"
+                  />
+                </div>
+                <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+                  <div className="flex items-center gap-2">
+                    <label
+                      htmlFor="sample-deadline"
+                      className="text-xs font-medium text-neutral-600"
+                    >
+                      Deadline
+                    </label>
+                    <input
+                      id="sample-deadline"
+                      type="date"
+                      value={sampleDeadline}
+                      onChange={(e) => setSampleDeadline(e.target.value)}
+                      className="border border-neutral-300 rounded-lg px-2.5 py-1.5 text-xs font-mono"
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    className="px-4 py-2 rounded-xl text-xs font-semibold bg-[#FFC20E] text-neutral-950 hover:bg-[#e5ae0b]"
+                  >
+                    Dispatch Sampled Request
+                  </button>
+                </div>
+              </form>
+            </section>
+
+            <section className="lg:col-span-5 bg-white border border-neutral-200 rounded-2xl p-6 space-y-3 shadow-xs">
+              <div className="flex items-center gap-2 border-b border-neutral-200 pb-3">
+                <ShieldAlert className="w-5 h-5 text-neutral-950" aria-hidden="true" />
+                <div>
+                  <h2 className="font-display text-base font-bold text-neutral-950">
+                    Escalations & Flags
+                  </h2>
+                  <p className="text-xs text-neutral-600">
+                    Active student difficulty flags and anchor escalations.
+                  </p>
+                </div>
+              </div>
+
+              <div className="space-y-2.5">
+                {scoped.adminFlags.length === 0 && (
+                  <p className="text-xs text-neutral-500 py-3">No active anchor escalations.</p>
+                )}
+                {scoped.adminFlags.map((flg) => (
+                  <div
+                    key={flg.flagId}
+                    className="border border-neutral-200 rounded-xl p-3 text-xs space-y-1"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-neutral-950">
+                        {flg.subjectName}
+                      </span>
+                      <span className="bg-neutral-950 text-white rounded-full px-2.5 py-0.5 text-[11px] font-semibold capitalize">
+                        {flg.flagType}
+                      </span>
+                    </div>
+                    <p className="text-neutral-700">{flg.details}</p>
+                    <p className="text-[11px] text-neutral-500">
+                      Raised by {flg.raisedBy}
+                    </p>
+                  </div>
+                ))}
+
+                {allPersons
+                  .filter((p) => p.difficultyFlag?.flagged)
+                  .map((p) => (
+                    <div
+                      key={`diff-${p.personId}`}
+                      className="border border-neutral-200 rounded-xl p-3 text-xs space-y-1"
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-neutral-950">
+                          {p.name} ({p.difficultyFlag?.category})
+                        </span>
+                        <span className="font-mono text-[11px] text-neutral-600">
+                          {p.personId}
+                        </span>
+                      </div>
+                      <p className="text-neutral-800">{p.difficultyFlag?.note}</p>
+                    </div>
+                  ))}
+              </div>
+            </section>
+          </div>
+        </div>
+      )}
+
+      {/* 6. SETTINGS TAB (Fee and roster cap only — No reset demo) */}
+      {activeTab === 'settings' && (
+        <div className="space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-neutral-200 pb-5">
+            <div>
+              <h1 className="font-display text-2xl sm:text-3xl font-extrabold text-neutral-950 tracking-[-0.02em]">
+                Settings
+              </h1>
+              <p className="text-sm text-neutral-600 mt-1">
+                Configure anchor renewal fee and cohort roster limits.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => onOtpVerify(false)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium border border-neutral-950 bg-white text-neutral-950 hover:bg-neutral-50"
+              >
+                <Lock className="w-3.5 h-3.5" aria-hidden="true" />
+                <span>Lock Admin</span>
+              </button>
+            </div>
+          </div>
+
+          <div className="max-w-2xl bg-white border border-neutral-200 rounded-2xl p-6 space-y-6 shadow-xs">
+            <div className="flex items-center justify-between border-b border-neutral-200 pb-3">
+              <div className="flex items-center gap-2">
+                <Settings className="w-4 h-4 text-neutral-950" aria-hidden="true" />
+                <h2 className="font-display text-base font-bold text-neutral-950">
+                  Cohort & Anchor Parameters
+                </h2>
+              </div>
+              <span className="bg-neutral-950 text-white rounded-full px-2.5 py-0.5 text-xs font-mono font-semibold tabular-nums">
+                Fee: Rs {scoped.anchorFeeAmount.toLocaleString()} · Cap: {scoped.rosterCap} scholars
+              </span>
+            </div>
+
+            <form onSubmit={handleSaveFeeSetting} className="space-y-2">
+              <label
+                htmlFor="admin-anchor-fee"
+                className="block text-xs font-semibold text-neutral-800"
+              >
+                Anchor Yearly Renewal Fee (Rs)
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  id="admin-anchor-fee"
+                  type="number"
+                  min="0"
+                  step="50"
+                  value={feeSettingInput}
+                  onChange={(e) => setFeeSettingInput(e.target.value)}
+                  className="w-44 border border-neutral-300 rounded-lg px-3 py-2 text-sm font-mono tabular-nums focus:outline-none focus:ring-2 focus:ring-neutral-950"
+                />
                 <button
                   type="submit"
                   className="px-4 py-2 rounded-xl text-xs font-semibold bg-[#FFC20E] text-neutral-950 hover:bg-[#e5ae0b]"
                 >
-                  Dispatch Sampled Request
+                  Save Fee
                 </button>
               </div>
-            </form>
-          </section>
-
-          {/* Admin Settings: Fee, Roster Cap, Reset Demo */}
-          <section className="bg-white border border-neutral-200 rounded-2xl p-6 space-y-4 shadow-xs">
-            <div className="flex items-center justify-between border-b border-neutral-200 pb-3">
-              <div className="flex items-center gap-2">
-                <Settings className="w-4 h-4 text-neutral-950" aria-hidden="true" />
-                <div>
-                  <p className="section-kicker">SYSTEM SETTINGS</p>
-                  <h2 className="font-display text-base font-bold text-neutral-950">
-                    Admin Settings (Fee, Roster Cap & Reset)
-                  </h2>
-                </div>
-              </div>
-              <span className="bg-neutral-950 text-white rounded-full px-2.5 py-0.5 text-xs font-mono font-semibold tabular-nums">
-                Rs {scoped.anchorFeeAmount.toLocaleString()} · Cap {scoped.rosterCap}
-              </span>
-            </div>
-
-            <form onSubmit={handleSaveFeeSetting} className="flex flex-wrap items-center gap-2">
-              <label
-                htmlFor="admin-anchor-fee"
-                className="text-xs font-medium text-neutral-600 min-w-[165px]"
-              >
-                Anchor Renewal Fee (Rs)
-              </label>
-              <input
-                id="admin-anchor-fee"
-                type="number"
-                min="0"
-                step="50"
-                value={feeSettingInput}
-                onChange={(e) => setFeeSettingInput(e.target.value)}
-                className="w-28 border border-neutral-300 rounded-lg px-3 py-1.5 text-sm font-mono tabular-nums"
-              />
-              <button
-                type="submit"
-                className="px-4 py-1.5 rounded-xl text-xs font-semibold bg-neutral-950 text-white hover:bg-neutral-800"
-              >
-                Save Fee
-              </button>
+              <p className="text-xs text-neutral-500">
+                Determines the renewal fee displayed on the anchor portal fee invoice.
+              </p>
             </form>
 
-            <form onSubmit={handleSaveCapSetting} className="flex flex-wrap items-center gap-2">
+            <form onSubmit={handleSaveCapSetting} className="space-y-2 pt-4 border-t border-neutral-100">
               <label
                 htmlFor="admin-roster-cap"
-                className="text-xs font-medium text-neutral-600 min-w-[165px]"
+                className="block text-xs font-semibold text-neutral-800"
               >
-                Anchor Roster Cap (Scholars)
+                Anchor Cohort Roster Cap (Scholars per Anchor)
               </label>
-              <input
-                id="admin-roster-cap"
-                type="number"
-                min="1"
-                max="50"
-                value={capSettingInput}
-                onChange={(e) => setCapSettingInput(e.target.value)}
-                className="w-28 border border-neutral-300 rounded-lg px-3 py-1.5 text-sm font-mono tabular-nums"
-              />
-              <button
-                type="submit"
-                className="px-4 py-1.5 rounded-xl text-xs font-semibold bg-neutral-950 text-white hover:bg-neutral-800"
-              >
-                Save Cap
-              </button>
-            </form>
-
-            <div className="border-t border-neutral-200 pt-3 flex items-center justify-between gap-2">
-              <span className="text-xs text-neutral-600">
-                Restore initial deterministic 2024–2026 seed events
-              </span>
-              <button
-                type="button"
-                onClick={() => {
-                  onResetDemo();
-                  setBannerMsg('Demo state restored to deterministic seed.');
-                }}
-                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-semibold border border-neutral-950 text-neutral-950 bg-white hover:bg-neutral-50"
-              >
-                <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
-                <span>Reset demo</span>
-              </button>
-            </div>
-          </section>
-        </div>
-
-        <section className="lg:col-span-6 bg-white border border-neutral-200 rounded-2xl p-6 space-y-3 shadow-xs">
-          <div className="flex items-center gap-2 border-b border-neutral-200 pb-3">
-            <ShieldAlert
-              className="w-5 h-5 text-neutral-950"
-              aria-hidden="true"
-            />
-            <div>
-              <p className="section-kicker">ESCALATIONS</p>
-              <h2 className="font-display text-lg font-bold text-neutral-950">
-                Anchor Escalations & Difficulty Flags
-              </h2>
-            </div>
-          </div>
-
-          <div className="space-y-2.5">
-            {scoped.adminFlags.map((flg) => (
-              <div
-                key={flg.flagId}
-                className="border border-neutral-200 rounded-xl p-3 text-xs space-y-1"
-              >
-                <div className="flex items-center justify-between">
-                  <span className="font-bold text-neutral-950">
-                    {flg.subjectName}
-                  </span>
-                  <span className="bg-neutral-950 text-white rounded-full px-2.5 py-0.5 text-[11px] font-semibold capitalize">
-                    {flg.flagType}
-                  </span>
-                </div>
-                <p className="text-neutral-700">{flg.details}</p>
-                <p className="text-[11px] text-neutral-500">
-                  Raised by {flg.raisedBy}
-                </p>
-              </div>
-            ))}
-
-            {allPersons
-              .filter((p) => p.difficultyFlag?.flagged)
-              .map((p) => (
-                <div
-                  key={`diff-${p.personId}`}
-                  className="border border-neutral-950 bg-neutral-50 rounded-xl p-3 text-xs space-y-1"
+              <div className="flex items-center gap-2">
+                <input
+                  id="admin-roster-cap"
+                  type="number"
+                  min="1"
+                  max="50"
+                  value={capSettingInput}
+                  onChange={(e) => setCapSettingInput(e.target.value)}
+                  className="w-44 border border-neutral-300 rounded-lg px-3 py-2 text-sm font-mono tabular-nums focus:outline-none focus:ring-2 focus:ring-neutral-950"
+                />
+                <button
+                  type="submit"
+                  className="px-4 py-2 rounded-xl text-xs font-semibold bg-neutral-950 text-white hover:bg-neutral-800"
                 >
-                  <div className="flex items-center justify-between">
-                    <span className="font-bold text-neutral-950">
-                      {p.name} ({p.difficultyFlag?.category})
-                    </span>
-                    <span className="font-mono text-[11px] text-neutral-600">
-                      {p.personId}
-                    </span>
-                  </div>
-                  <p className="text-neutral-800">{p.difficultyFlag?.note}</p>
-                </div>
-              ))}
-          </div>
-        </section>
-      </div>
-
-      {/* 4. Year-over-Year Cycle Comparison + Audit Trail */}
-      <section className="bg-white border border-neutral-200 rounded-2xl p-6 space-y-5 shadow-xs">
-        <div className="flex items-center gap-2 border-b border-neutral-200 pb-3">
-          <BarChart3 className="w-5 h-5 text-neutral-950" aria-hidden="true" />
-          <div>
-            <p className="section-kicker">MULTI-YEAR TRENDS</p>
-            <h2 className="font-display text-lg font-bold text-neutral-950">
-              Year-over-Year Cycle Comparison (2024, 2025, 2026) & Audit Trail
-            </h2>
-            <p className="text-xs text-neutral-600">
-              Total applicants (~12,000/year) vs selected scholars (500–700/year) derived from baseline & live lifecycle events
-            </p>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-center">
-          <div className="lg:col-span-7 h-72 w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart
-                data={yoyData}
-                margin={{ top: 10, right: 16, left: 4, bottom: 5 }}
-              >
-                <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-                <XAxis
-                  dataKey="cycleLabel"
-                  tick={{
-                    fill: '#111827',
-                    fontSize: 12,
-                    fontWeight: 600,
-                    fontFamily: "'Manrope', system-ui, sans-serif",
-                  }}
-                />
-                <YAxis
-                  tick={{
-                    fill: '#4B5563',
-                    fontSize: 11,
-                    fontWeight: 600,
-                    fontFamily: "'Manrope', system-ui, sans-serif",
-                  }}
-                  tickFormatter={(v) => Number(v).toLocaleString()}
-                />
-                <Tooltip
-                  formatter={(value: unknown, name: unknown) => [
-                    Number(value ?? 0).toLocaleString(),
-                    String(name ?? ''),
-                  ]}
-                  contentStyle={{
-                    borderRadius: 8,
-                    border: '1px solid #E5E7EB',
-                    fontSize: 12,
-                    fontFamily: "'Manrope', system-ui, sans-serif",
-                  }}
-                  labelStyle={{
-                    fontWeight: 700,
-                    fontFamily: "'Manrope', system-ui, sans-serif",
-                  }}
-                  itemStyle={{
-                    fontWeight: 600,
-                    fontFamily: "'Manrope', system-ui, sans-serif",
-                  }}
-                />
-                <Legend
-                  wrapperStyle={{
-                    fontSize: 12,
-                    fontWeight: 600,
-                    fontFamily: "'Manrope', system-ui, sans-serif",
-                  }}
-                />
-                <Bar
-                  dataKey="applicants"
-                  name="Total Applicants"
-                  fill="#0A0A0A"
-                  radius={[4, 4, 0, 0]}
-                />
-                <Bar
-                  dataKey="selected"
-                  name="Selected Scholars"
-                  fill="#FFC20E"
-                  radius={[4, 4, 0, 0]}
-                />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-
-          <div className="lg:col-span-5 grid grid-cols-1 gap-3">
-            {yoyData.map((row) => (
-              <div
-                key={row.cycleId}
-                className={`border rounded-xl p-3.5 flex items-center justify-between gap-3 ${
-                  cycleFilter === row.cycleId
-                    ? 'border-neutral-950 bg-neutral-50'
-                    : 'border-neutral-200'
-                }`}
-              >
-                <div>
-                  <p className="font-display text-sm font-bold text-neutral-950">
-                    {row.cycleLabel}
-                  </p>
-                  <p className="text-xs font-mono tabular-nums text-neutral-600 mt-0.5">
-                    {row.applicants.toLocaleString()} applicants ·{' '}
-                    {row.selected.toLocaleString()} selected
-                  </p>
-                </div>
-                <span className="bg-neutral-950 text-white rounded-full px-2.5 py-0.5 text-xs font-mono font-semibold tabular-nums shrink-0">
-                  {row.rate}% rate
-                </span>
+                  Save Cap
+                </button>
               </div>
-            ))}
+              <p className="text-xs text-neutral-500">
+                Maximum number of active scholars assigned to a single anchor.
+              </p>
+            </form>
           </div>
         </div>
-
-        <div className="overflow-x-auto border-t border-neutral-200 pt-4">
-          <h3 className="text-xs font-bold text-neutral-700 mb-2">
-            Status Change Audit Trail ({statusAuditTrail.length} events)
-          </h3>
-          <table className="w-full text-left text-xs">
-            <thead>
-              <tr className="border-b border-neutral-200 text-neutral-500">
-                <th className="py-2 pr-3 font-semibold">Seq</th>
-                <th className="py-2 pr-3 font-semibold">Cycle</th>
-                <th className="py-2 pr-3 font-semibold">Person</th>
-                <th className="py-2 pr-3 font-semibold">Transition Event</th>
-                <th className="py-2 pr-3 font-semibold">Actor</th>
-                <th className="py-2 font-semibold">Timestamp</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-neutral-100">
-              {statusAuditTrail.slice(0, 14).map((ev) => (
-                <tr key={ev.id}>
-                  <td className="py-2 pr-3 font-mono tabular-nums text-neutral-500">
-                    #{ev.seq}
-                  </td>
-                  <td className="py-2 pr-3 font-mono tabular-nums">
-                    {ev.cycleId}
-                  </td>
-                  <td className="py-2 pr-3 font-semibold text-neutral-950">
-                    {scoped.persons[ev.personId]?.name || ev.personId}
-                  </td>
-                  <td className="py-2 pr-3 font-mono text-[11px] text-neutral-800">
-                    {ev.type}
-                  </td>
-                  <td className="py-2 pr-3 text-neutral-600">{ev.actor}</td>
-                  <td className="py-2 font-mono tabular-nums text-neutral-500">
-                    {format(new Date(ev.occurredAt), 'dd MMM yyyy, HH:mm')}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
+      )}
     </div>
   );
 };

@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   createColumnHelper,
   tableFeatures,
@@ -45,6 +45,13 @@ export const EventLogScreen: React.FC<EventLogScreenProps> = ({
   const [dateFilter, setDateFilter] = useState<string>('');
   const [replayFromDate, setReplayFromDate] = useState<string>('2026-11-01');
   const [actionBanner, setActionBanner] = useState<string>('');
+
+  useEffect(() => {
+    if (actionBanner) {
+      const timer = setTimeout(() => setActionBanner(''), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [actionBanner]);
 
   const personOptions = useMemo(
     () => Array.from(new Set(events.map((e) => e.personId))).sort(),
@@ -134,36 +141,30 @@ export const EventLogScreen: React.FC<EventLogScreenProps> = ({
 
   return (
     <div className="space-y-8">
-      {/* Header + Replay / Simulation Toolbar with ONE offset #FFC20E block */}
-      <div className="relative pr-2 pb-2">
-        <div
-          aria-hidden="true"
-          className="absolute inset-0 translate-x-2 translate-y-2 bg-[#FFC20E] rounded-2xl"
-        />
-        <section className="relative bg-white border border-neutral-950 rounded-2xl p-6 space-y-4">
-          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-            <div className="space-y-1.5">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="bg-neutral-950 text-white rounded-full px-3 py-0.5 text-[11px] font-bold uppercase tracking-[0.12em]">
-                  Admin Only · Append-Only Store
-                </span>
-                <span className="text-xs font-semibold tabular-nums text-neutral-600">
-                  Total Events: {events.length} · Worker Bookmark Seq: #
-                  {workerBookmark.lastSeq} · Outbox Emails:{' '}
-                  {workerBookmark.outbox.length}
-                </span>
-              </div>
-              <h1 className="font-display text-2xl sm:text-3xl font-extrabold text-neutral-950 tracking-[-0.02em]">
-                Audit and <span className="heading-highlight">Event Log</span>
-              </h1>
-              <p className="text-sm text-neutral-600">
-                Every state transition is an immutable event. Replay deterministically without duplicate outbox emails.
-              </p>
-            </div>
+      {/* Page Header */}
+      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 border-b border-neutral-200 pb-5">
+        <div className="space-y-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="bg-neutral-950 text-white rounded-full px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-[0.12em]">
+              Admin Only
+            </span>
+            <span className="text-xs font-semibold tabular-nums text-neutral-600">
+              Total Events: {events.length} · Worker Bookmark Seq: #{workerBookmark.lastSeq} · Outbox Emails: {workerBookmark.outbox.length}
+            </span>
           </div>
+          <h1 className="font-display text-2xl sm:text-3xl font-extrabold text-neutral-950 tracking-[-0.02em]">
+            Audit and Event Log
+          </h1>
+          <p className="text-sm text-neutral-600">
+            Every state transition is an immutable event. Replay deterministically without duplicate outbox emails.
+          </p>
+        </div>
+      </div>
 
-          {/* Replay & Simulation Buttons (Exactly ONE yellow primary CTA) */}
-          <div className="flex flex-wrap items-center gap-2.5 pt-3 border-t border-neutral-200">
+      {/* Replay & Simulation Toolbar */}
+      <section className="bg-white border border-neutral-200 rounded-2xl p-5 shadow-xs space-y-3">
+        <p className="text-xs font-bold text-neutral-500 uppercase tracking-wider">Event Replay & Testing</p>
+        <div className="flex flex-wrap items-center gap-2.5">
             <button
               type="button"
               onClick={() => {
@@ -248,7 +249,6 @@ export const EventLogScreen: React.FC<EventLogScreenProps> = ({
             </button>
           </div>
         </section>
-      </div>
 
       {actionBanner && (
         <div

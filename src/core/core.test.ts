@@ -24,6 +24,7 @@ import {
   getEventActor,
   getHomeRouteForRole,
   getNavItemsForRole,
+  getSidebarItemsForRole,
   selectForUser,
   verifyRoleCredentials,
 } from './scoping';
@@ -387,7 +388,7 @@ describe('Maatram One Event-Sourced Core', () => {
   });
 });
 
-describe('Maatram One Follow-up 2 Role Auth, Route Guard & Scoping', () => {
+describe('Maatram One Role Auth, Route Guard & Scoping', () => {
   it('enforces route guards and home routes per role', () => {
     expect(getHomeRouteForRole('applicant')).toBe('/applicant');
     expect(getHomeRouteForRole('student')).toBe('/student');
@@ -395,6 +396,7 @@ describe('Maatram One Follow-up 2 Role Auth, Route Guard & Scoping', () => {
     expect(getHomeRouteForRole('admin')).toBe('/admin');
 
     expect(canAccessRoute(null, '/login')).toBe(true);
+    expect(canAccessRoute(null, '/login/applicant')).toBe(true);
     expect(canAccessRoute(null, '/student')).toBe(false);
     expect(canAccessRoute(null, '/admin')).toBe(false);
 
@@ -404,10 +406,13 @@ describe('Maatram One Follow-up 2 Role Auth, Route Guard & Scoping', () => {
       DEMO_ACCOUNTS.applicant.password
     ).user!;
     expect(canAccessRoute(applicantUser, '/applicant')).toBe(true);
+    expect(canAccessRoute(applicantUser, '/applicant/documents')).toBe(true);
     expect(canAccessRoute(applicantUser, '/student')).toBe(false);
     expect(canAccessRoute(applicantUser, '/anchor')).toBe(false);
     expect(canAccessRoute(applicantUser, '/admin')).toBe(false);
+    expect(canAccessRoute(applicantUser, '/alumni')).toBe(false);
     expect(canAccessRoute(applicantUser, '/events')).toBe(false);
+    expect(canAccessRoute(applicantUser, '/profile')).toBe(true);
 
     const studentUser = verifyRoleCredentials(
       'student',
@@ -415,9 +420,13 @@ describe('Maatram One Follow-up 2 Role Auth, Route Guard & Scoping', () => {
       DEMO_ACCOUNTS.student.password
     ).user!;
     expect(canAccessRoute(studentUser, '/student')).toBe(true);
+    expect(canAccessRoute(studentUser, '/student/volunteering')).toBe(true);
+    expect(canAccessRoute(studentUser, '/applicant')).toBe(false);
+    expect(canAccessRoute(studentUser, '/anchor')).toBe(false);
     expect(canAccessRoute(studentUser, '/alumni')).toBe(false);
     expect(canAccessRoute(studentUser, '/admin')).toBe(false);
     expect(canAccessRoute(studentUser, '/events')).toBe(false);
+    expect(canAccessRoute(studentUser, '/profile')).toBe(true);
 
     const anchorUser = verifyRoleCredentials(
       'anchor',
@@ -425,9 +434,14 @@ describe('Maatram One Follow-up 2 Role Auth, Route Guard & Scoping', () => {
       DEMO_ACCOUNTS.anchor.password
     ).user!;
     expect(canAccessRoute(anchorUser, '/anchor')).toBe(true);
-    expect(canAccessRoute(anchorUser, '/alumni')).toBe(true);
-    expect(canAccessRoute(anchorUser, '/admin')).toBe(false);
+    expect(canAccessRoute(anchorUser, '/anchor/roster')).toBe(true);
+    expect(canAccessRoute(anchorUser, '/applicant')).toBe(false);
+    expect(canAccessRoute(anchorUser, '/student')).toBe(false);
+    // Anchor redirected from alumni tracker and event log
+    expect(canAccessRoute(anchorUser, '/alumni')).toBe(false);
     expect(canAccessRoute(anchorUser, '/events')).toBe(false);
+    expect(canAccessRoute(anchorUser, '/admin')).toBe(false);
+    expect(canAccessRoute(anchorUser, '/profile')).toBe(true);
 
     const adminUser = verifyRoleCredentials(
       'admin',
@@ -435,42 +449,177 @@ describe('Maatram One Follow-up 2 Role Auth, Route Guard & Scoping', () => {
       DEMO_ACCOUNTS.admin.password
     ).user!;
     expect(canAccessRoute(adminUser, '/admin')).toBe(true);
+    expect(canAccessRoute(adminUser, '/admin/applicants')).toBe(true);
+    expect(canAccessRoute(adminUser, '/admin/cycles')).toBe(true);
     expect(canAccessRoute(adminUser, '/alumni')).toBe(true);
     expect(canAccessRoute(adminUser, '/events')).toBe(true);
+    expect(canAccessRoute(adminUser, '/applicant')).toBe(false);
     expect(canAccessRoute(adminUser, '/student')).toBe(false);
-
-    expect(getNavItemsForRole('anchor').map((n) => n.path)).toEqual(['/anchor', '/alumni']);
-    expect(getNavItemsForRole('admin').map((n) => n.path)).toEqual(['/admin', '/alumni', '/events']);
+    expect(canAccessRoute(adminUser, '/anchor')).toBe(false);
+    expect(canAccessRoute(adminUser, '/profile')).toBe(true);
   });
 
-  it('verifies demo credentials and rejects invalid credentials', () => {
-    const okDivya = verifyRoleCredentials(
+  it('provides sidebar items matching Section 4 exactly for each role', () => {
+    const applicantItems = getSidebarItemsForRole('applicant');
+    expect(applicantItems.map((i) => i.label)).toEqual([
+      'Application',
+      'Form',
+      'Documents',
+      'Status history',
+    ]);
+    expect(applicantItems.map((i) => i.path)).toEqual([
+      '/applicant/application',
+      '/applicant/form',
+      '/applicant/documents',
+      '/applicant/history',
+    ]);
+
+    const studentItems = getSidebarItemsForRole('student');
+    expect(studentItems.map((i) => i.label)).toEqual([
+      'Overview',
+      'Volunteering',
+      'Achievements and CGPA',
+      'Meetings and announcements',
+      'Placement',
+      'Get help',
+    ]);
+    expect(studentItems.map((i) => i.path)).toEqual([
+      '/student/overview',
+      '/student/volunteering',
+      '/student/academics',
+      '/student/meetings',
+      '/student/placement',
+      '/student/help',
+    ]);
+
+    const anchorItems = getSidebarItemsForRole('anchor');
+    expect(anchorItems.map((i) => i.label)).toEqual([
+      'Roster',
+      'Announcements',
+      'Meetings and leave',
+      'Resources',
+      'Volunteering approvals',
+      'Requests inbox',
+      'Anchor fee and receipt',
+    ]);
+    expect(anchorItems.map((i) => i.path)).toEqual([
+      '/anchor/roster',
+      '/anchor/announcements',
+      '/anchor/meetings',
+      '/anchor/resources',
+      '/anchor/approvals',
+      '/anchor/requests',
+      '/anchor/fee',
+    ]);
+    // Verifies Alumni Directory is removed for Anchor
+    expect(anchorItems.some((i) => i.label.toLowerCase().includes('alumni'))).toBe(false);
+
+    const adminItems = getSidebarItemsForRole('admin');
+    expect(adminItems.map((i) => i.label)).toEqual([
+      'Applicants',
+      'Cycles',
+      'Volunteering verification',
+      'Awards',
+      'Sampled requests',
+      'Alumni career tracker',
+      'Audit and Event Log',
+      'Settings',
+    ]);
+    expect(adminItems.map((i) => i.path)).toEqual([
+      '/admin/applicants',
+      '/admin/cycles',
+      '/admin/verification',
+      '/admin/awards',
+      '/admin/sampled',
+      '/admin/alumni',
+      '/admin/events',
+      '/admin/settings',
+    ]);
+  });
+
+  it('verifies demo credentials, rejects wrong passwords, and blocks cross-portal login attempts', () => {
+    // 1. Applicant
+    const okApp = verifyRoleCredentials(
       'applicant',
-      'divya.r@maatram-synthetic.edu.in',
-      'maatram-applicant'
+      'divya.r@maatram.demo',
+      'Demo@123'
     );
-    expect(okDivya.valid).toBe(true);
-    expect(okDivya.user?.personId).toBe('P-2026-07');
-    expect(okDivya.user?.name).toBe('Divya R');
+    expect(okApp.valid).toBe(true);
+    expect(okApp.user?.personId).toBe('P-2026-07');
+    expect(okApp.user?.name).toBe('Divya R');
 
-    const badPass = verifyRoleCredentials(
+    // Cross-portal rejection
+    const appWrongPortal = verifyRoleCredentials(
+      'applicant',
+      'arun.k@maatram.demo',
+      'Demo@123'
+    );
+    expect(appWrongPortal.valid).toBe(false);
+    expect(appWrongPortal.error).toBe('This account belongs to a different portal');
+
+    // 2. Student
+    const okStudent = verifyRoleCredentials(
       'student',
-      'arun.k@maatram-synthetic.edu.in',
-      'wrong-password'
+      'arun.k@maatram.demo',
+      'Demo@123'
     );
-    expect(badPass.valid).toBe(false);
+    expect(okStudent.valid).toBe(true);
+    expect(okStudent.user?.personId).toBe('P-2024-01');
 
+    const studentWrongPortal = verifyRoleCredentials(
+      'student',
+      'meera.krishnan@maatram.demo',
+      'Demo@123'
+    );
+    expect(studentWrongPortal.valid).toBe(false);
+    expect(studentWrongPortal.error).toBe('This account belongs to a different portal');
+
+    // 3. Anchor
+    const okAnchor = verifyRoleCredentials(
+      'anchor',
+      'meera.krishnan@maatram.demo',
+      'Demo@123'
+    );
+    expect(okAnchor.valid).toBe(true);
+    expect(okAnchor.user?.personId).toBe('P-2020-01');
+
+    const anchorWrongPortal = verifyRoleCredentials(
+      'anchor',
+      'admin@maatram.demo',
+      'Demo@123'
+    );
+    expect(anchorWrongPortal.valid).toBe(false);
+    expect(anchorWrongPortal.error).toBe('This account belongs to a different portal');
+
+    // 4. Admin
     const okAdmin = verifyRoleCredentials(
       'admin',
-      'admin@maatram-synthetic.edu.in',
-      'maatram-admin'
+      'admin@maatram.demo',
+      'Demo@123'
     );
     expect(okAdmin.valid).toBe(true);
     expect(verifyAdminOtp('123456').valid).toBe(true);
-    expect(verifyAdminOtp('000000').valid).toBe(false);
+    expect(verifyAdminOtp('999999').valid).toBe(false);
+
+    const adminWrongPortal = verifyRoleCredentials(
+      'admin',
+      'divya.r@maatram.demo',
+      'Demo@123'
+    );
+    expect(adminWrongPortal.valid).toBe(false);
+    expect(adminWrongPortal.error).toBe('This account belongs to a different portal');
+
+    // Wrong password for any role
+    const badPass = verifyRoleCredentials(
+      'student',
+      'arun.k@maatram.demo',
+      'wrong-pass'
+    );
+    expect(badPass.valid).toBe(false);
+    expect(badPass.error).toBe('Invalid email or password.');
   });
 
-  it('scopes selectForUser strictly by role across applicant, student, anchor, and admin', () => {
+  it('scopes selectForUser strictly by role and prevents anchor from reading alumni directory', () => {
     const state = foldEvents(buildSeedEvents());
 
     const applicantUser = verifyRoleCredentials(
@@ -517,7 +666,8 @@ describe('Maatram One Follow-up 2 Role Auth, Route Guard & Scoping', () => {
       expect(anchorView.roster.every((p) => p.anchorId === 'P-2020-01')).toBe(true);
       expect(anchorView.ownAnnouncements.every((a) => a.anchorId === 'P-2020-01')).toBe(true);
       expect(anchorView.ownMeetings.every((m) => m.anchorId === 'P-2020-01')).toBe(true);
-      expect(anchorView.alumniDirectory.length).toBeGreaterThan(0);
+      // Anchor cannot read alumni directory / other alumni career history
+      expect('alumniDirectory' in anchorView).toBe(false);
     }
 
     const adminUser = verifyRoleCredentials(
@@ -531,6 +681,7 @@ describe('Maatram One Follow-up 2 Role Auth, Route Guard & Scoping', () => {
       expect(adminView.allPersons.length).toBeGreaterThan(10);
       expect(adminView.events.length).toBe(state.events.length);
       expect(adminView.rosterCap).toBe(15);
+      expect(adminView.alumniDirectory.length).toBeGreaterThan(0);
     }
 
     expect(selectForUser(state, null)).toBeNull();
@@ -542,6 +693,64 @@ describe('Maatram One Follow-up 2 Role Auth, Route Guard & Scoping', () => {
     expect(getEventActor(verifyRoleCredentials('student', DEMO_ACCOUNTS.student.email, DEMO_ACCOUNTS.student.password).user!)).toBe('Arun K');
     expect(getEventActor(verifyRoleCredentials('anchor', DEMO_ACCOUNTS.anchor.email, DEMO_ACCOUNTS.anchor.password).user!)).toBe('Meera Krishnan (Anchor)');
     expect(getEventActor(verifyRoleCredentials('admin', DEMO_ACCOUNTS.admin.email, DEMO_ACCOUNTS.admin.password).user!)).toBe('Admin (OTP verified)');
+  });
+
+  it('appends profile.updated event and applies updates without silent mutation', () => {
+    const initialState = foldEvents(buildSeedEvents());
+    const actor = 'Arun K';
+
+    const updated = applyEvent(
+      initialState,
+      makeEvent({
+        id: 'EVT-PROF-TEST-1',
+        seq: initialState.nextSeq,
+        type: 'profile.updated',
+        personId: 'P-2024-01',
+        actor,
+        payload: {
+          name: 'Arun Kumar',
+          phone: '+91 98765 43210',
+          college: 'PSG College of Technology',
+          degree: 'B.Tech Information Technology',
+          photoUrl: 'data:image/png;base64,mock',
+        },
+      })
+    );
+
+    const person = updated.persons['P-2024-01'];
+    expect(person.name).toBe('Arun Kumar');
+    expect(person.phone).toBe('+91 98765 43210');
+    expect(person.college).toBe('PSG College of Technology');
+    expect(person.photoUrl).toBe('data:image/png;base64,mock');
+  });
+
+  it('appends anchor career entry and updates current job via deterministic replay', () => {
+    const initialState = foldEvents(buildSeedEvents());
+    const anchorActor = 'Meera Krishnan (Anchor)';
+
+    const withNewJob = applyEvent(
+      initialState,
+      makeEvent({
+        id: 'EVT-CAREER-TEST-1',
+        seq: initialState.nextSeq,
+        type: 'CAREER_HISTORY_ADDED',
+        personId: 'P-2020-01',
+        actor: anchorActor,
+        payload: {
+          entryId: 'CH-MEERA-NEW',
+          company: 'Tata Consultancy Services Pvt Ltd',
+          roleTitle: 'Principal Architect',
+          startYear: 2026,
+          source: 'self-reported',
+        },
+      })
+    );
+
+    const replayed = replayFromStart(withNewJob.events);
+    const meera = replayed.persons['P-2020-01'];
+    expect(meera.currentCompany).toBe('Tata Consultancy Services Pvt Ltd');
+    expect(meera.currentRoleTitle).toBe('Principal Architect');
+    expect(meera.careerHistory.some((c) => c.entryId === 'CH-MEERA-NEW')).toBe(true);
   });
 });
 

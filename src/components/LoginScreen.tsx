@@ -1,329 +1,486 @@
 import React, { useState } from 'react';
-import { ArrowRight, KeyRound, Play, RotateCcw, ShieldCheck, UserPlus } from 'lucide-react';
-import { DEMO_ACCOUNTS, verifyRoleCredentials } from '../core/scoping';
+import {
+  Link,
+  useNavigate,
+  useParams,
+} from 'react-router-dom';
+import {
+  ArrowLeft,
+  ArrowRight,
+  ChevronDown,
+  ChevronUp,
+  Eye,
+  EyeOff,
+  FileText,
+  GraduationCap,
+  KeyRound,
+  ShieldCheck,
+  Users,
+} from 'lucide-react';
+import {
+  DEMO_ACCOUNTS,
+  verifyRoleCredentials,
+} from '../core/scoping';
 import type { AuthSessionUser, UserRole } from '../core/types';
+import { DEMO_ADMIN_OTP, verifyAdminOtp } from '../core/validation';
 
 interface LoginScreenProps {
   onLogin: (user: AuthSessionUser) => void;
   onStartPublicApplication: () => void;
-  onStartGuidedDemo: () => void;
-  onResetDemo: () => void;
+  setAdminOtpVerified?: (verified: boolean) => void;
 }
 
-const ROLE_ORDER: UserRole[] = ['applicant', 'student', 'anchor', 'admin'];
-
-const ROLE_LABELS: Record<UserRole, string> = {
-  applicant: 'Applicant',
-  student: 'Student',
-  anchor: 'Anchor',
-  admin: 'Admin',
-};
+const ROLES_LIST: Array<{
+  role: UserRole;
+  title: string;
+  tagline: string;
+  icon: React.ComponentType<{ className?: string }>;
+}> = [
+  {
+    role: 'applicant',
+    title: 'Applicant',
+    tagline: 'Track your application',
+    icon: FileText,
+  },
+  {
+    role: 'student',
+    title: 'Student',
+    tagline: 'Learning and volunteering',
+    icon: GraduationCap,
+  },
+  {
+    role: 'anchor',
+    title: 'Anchor',
+    tagline: 'Mentor your cohort',
+    icon: Users,
+  },
+  {
+    role: 'admin',
+    title: 'Admin',
+    tagline: 'Review and verify',
+    icon: ShieldCheck,
+  },
+];
 
 export const LoginScreen: React.FC<LoginScreenProps> = ({
   onLogin,
   onStartPublicApplication,
-  onStartGuidedDemo,
-  onResetDemo,
+  setAdminOtpVerified,
 }) => {
-  const [credentials, setCredentials] = useState<
-    Record<UserRole, { email: string; password: string }>
-  >({
-    applicant: {
-      email: DEMO_ACCOUNTS.applicant.email,
-      password: DEMO_ACCOUNTS.applicant.password,
-    },
-    student: {
-      email: DEMO_ACCOUNTS.student.email,
-      password: DEMO_ACCOUNTS.student.password,
-    },
-    anchor: {
-      email: DEMO_ACCOUNTS.anchor.email,
-      password: DEMO_ACCOUNTS.anchor.password,
-    },
-    admin: {
-      email: DEMO_ACCOUNTS.admin.email,
-      password: DEMO_ACCOUNTS.admin.password,
-    },
-  });
+  const { role: urlRole } = useParams<{ role?: string }>();
+  const navigate = useNavigate();
 
-  const [errors, setErrors] = useState<Partial<Record<UserRole, string>>>({});
-  const [resetBanner, setResetBanner] = useState<string>('');
+  const selectedRole = (
+    urlRole && ['applicant', 'student', 'anchor', 'admin'].includes(urlRole)
+      ? urlRole
+      : null
+  ) as UserRole | null;
 
-  const handleFieldChange = (
-    role: UserRole,
-    field: 'email' | 'password',
-    value: string
-  ) => {
-    setCredentials((prev) => ({
-      ...prev,
-      [role]: { ...prev[role], [field]: value },
-    }));
-    setErrors((prev) => ({ ...prev, [role]: undefined }));
+  // Form states for role login
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showDemoCreds, setShowDemoCreds] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
+
+  // Admin mock OTP states
+  const [adminAwaitingOtp, setAdminAwaitingOtp] = useState(false);
+  const [pendingAdminUser, setPendingAdminUser] = useState<AuthSessionUser | null>(null);
+  const [otpInput, setOtpInput] = useState('');
+  const [otpError, setOtpError] = useState('');
+
+  const currentRoleConfig = selectedRole
+    ? ROLES_LIST.find((r) => r.role === selectedRole)
+    : null;
+
+  const handleUseDemoAccount = () => {
+    if (!selectedRole) return;
+    const creds = DEMO_ACCOUNTS[selectedRole];
+    setEmail(creds.email);
+    setPassword(creds.password);
+    setErrorMsg('');
   };
 
-  const handleRoleSignIn = (e: React.FormEvent, role: UserRole) => {
+  const handleSignIn = (e: React.FormEvent) => {
     e.preventDefault();
-    const { email, password } = credentials[role];
-    const result = verifyRoleCredentials(role, email, password);
+    if (!selectedRole) return;
+    setErrorMsg('');
+
+    const result = verifyRoleCredentials(selectedRole, email, password);
     if (!result.valid || !result.user) {
-      setErrors((prev) => ({ ...prev, [role]: result.error || 'Login failed.' }));
+      setErrorMsg(result.error || 'Invalid credentials.');
       return;
     }
+
+    // Admin role requires mock OTP screen (OTP 123456)
+    if (selectedRole === 'admin') {
+      setPendingAdminUser(result.user);
+      setAdminAwaitingOtp(true);
+      setOtpInput('');
+      setOtpError('');
+      return;
+    }
+
     onLogin(result.user);
   };
 
-  const handleReset = () => {
-    onResetDemo();
-    setResetBanner('All demo events and workspaces restored to clean seed state.');
+  const handleVerifyOtp = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!pendingAdminUser) return;
+    const otpCheck = verifyAdminOtp(otpInput);
+    if (!otpCheck.valid) {
+      setOtpError(otpCheck.error || 'Invalid OTP.');
+      return;
+    }
+    if (setAdminOtpVerified) {
+      setAdminOtpVerified(true);
+    }
+    onLogin(pendingAdminUser);
   };
 
-  return (
-    <div className="min-h-screen bg-white text-neutral-950 flex flex-col">
-      {/* Minimal Header */}
-      <header className="border-b border-neutral-200 bg-white">
-        <div className="max-w-[1280px] mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-1.5">
+  const handleBackToRoles = () => {
+    setEmail('');
+    setPassword('');
+    setErrorMsg('');
+    setAdminAwaitingOtp(false);
+    setPendingAdminUser(null);
+    navigate('/login');
+  };
+
+  // If no role selected, show the Role Selector card (/login)
+  if (!selectedRole) {
+    return (
+      <div className="min-h-screen bg-white text-neutral-950 flex flex-col justify-between">
+        {/* Simple top bar / header */}
+        <header className="border-b border-neutral-200 bg-white">
+          <div className="max-w-[1280px] mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
+            <Link to="/" className="flex items-center gap-1.5">
               <span className="font-display text-xl font-extrabold tracking-[-0.02em] text-neutral-950">
                 Maatram
               </span>
               <span className="bg-neutral-950 text-white rounded-full px-2.5 py-0.5 text-xs font-semibold tracking-tight">
                 One
               </span>
-            </div>
-            <span className="hidden sm:inline text-xs text-neutral-500 border-l border-neutral-200 pl-3">
-              From application to alumni stewardship
-            </span>
+            </Link>
+            <Link
+              to="/"
+              className="text-xs font-semibold text-neutral-600 hover:text-neutral-950"
+            >
+              Back to Home
+            </Link>
           </div>
+        </header>
 
+        {/* Centered card with wordmark, sign-in line, and 4 stacked role cards */}
+        <main className="flex-1 flex items-center justify-center p-4 sm:p-6">
+          <div className="w-full max-w-md bg-white border border-neutral-200 rounded-3xl p-6 sm:p-8 shadow-xs space-y-6">
+            <div className="text-center space-y-2">
+              <div className="inline-flex items-center gap-1.5">
+                <span className="font-display text-2xl font-extrabold tracking-[-0.02em] text-neutral-950">
+                  Maatram
+                </span>
+                <span className="bg-neutral-950 text-white rounded-full px-2.5 py-0.5 text-xs font-semibold tracking-tight">
+                  One
+                </span>
+              </div>
+              <p className="text-sm text-neutral-600">
+                Sign in to your Maatram One workspace
+              </p>
+            </div>
+
+            <div className="space-y-3">
+              <p className="text-[11px] font-bold uppercase tracking-wider text-neutral-400">
+                SELECT PORTAL ROLE
+              </p>
+
+              <div className="space-y-2.5">
+                {ROLES_LIST.map((item) => {
+                  const Icon = item.icon;
+                  return (
+                    <button
+                      key={item.role}
+                      type="button"
+                      onClick={() => navigate(`/login/${item.role}`)}
+                      className="w-full flex items-center justify-between p-4 rounded-2xl border border-neutral-200 hover:border-neutral-950 hover:bg-neutral-50 transition-all text-left group"
+                    >
+                      <div className="flex items-center gap-3.5">
+                        <div className="w-10 h-10 rounded-xl bg-neutral-100 flex items-center justify-center text-neutral-900 group-hover:bg-neutral-950 group-hover:text-white transition-colors shrink-0">
+                          <Icon className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <p className="font-display text-sm font-bold text-neutral-950">
+                            {item.title}
+                          </p>
+                          <p className="text-xs text-neutral-500">
+                            {item.tagline}
+                          </p>
+                        </div>
+                      </div>
+                      <ArrowRight className="w-4 h-4 text-neutral-400 group-hover:text-neutral-950 group-hover:translate-x-0.5 transition-all" />
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </main>
+
+        <footer className="border-t border-neutral-200 bg-white py-4 px-4 sm:px-6">
+          <div className="max-w-[1280px] mx-auto text-center text-xs text-neutral-400">
+            MH26-05
+          </div>
+        </footer>
+      </div>
+    );
+  }
+
+  // Role-specific sign-in view (/login/applicant, /login/student, /login/anchor, /login/admin)
+  const roleTitle = `${currentRoleConfig?.title || 'User'} sign in`;
+  const demoAccountInfo = DEMO_ACCOUNTS[selectedRole];
+
+  return (
+    <div className="min-h-screen bg-white text-neutral-950 flex flex-col justify-between">
+      {/* Header */}
+      <header className="border-b border-neutral-200 bg-white">
+        <div className="max-w-[1280px] mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
+          <Link to="/" className="flex items-center gap-1.5">
+            <span className="font-display text-xl font-extrabold tracking-[-0.02em] text-neutral-950">
+              Maatram
+            </span>
+            <span className="bg-neutral-950 text-white rounded-full px-2.5 py-0.5 text-xs font-semibold tracking-tight">
+              One
+            </span>
+          </Link>
           <button
             type="button"
-            onClick={handleReset}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border border-neutral-950 text-neutral-950 bg-white hover:bg-neutral-50 transition-colors"
+            onClick={handleBackToRoles}
+            className="inline-flex items-center gap-1 text-xs font-semibold text-neutral-600 hover:text-neutral-950"
           >
-            <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
-            <span>Reset demo</span>
+            <ArrowLeft className="w-3.5 h-3.5" />
+            <span>Back to roles</span>
           </button>
         </div>
       </header>
 
-      <main className="flex-1 max-w-[1280px] w-full mx-auto px-4 sm:px-6 py-8 sm:py-12 space-y-12">
-        {resetBanner && (
-          <div
-            role="status"
-            className="bg-neutral-950 text-white rounded-xl px-4 py-3 text-sm flex items-center justify-between gap-4"
-          >
-            <span>{resetBanner}</span>
+      <main className="flex-1 flex items-center justify-center p-4 sm:p-6">
+        <div className="w-full max-w-md bg-white border border-neutral-200 rounded-3xl p-6 sm:p-8 shadow-xs space-y-6">
+          {/* Header */}
+          <div className="space-y-1">
+            <h1 className="font-display text-2xl font-extrabold tracking-tight text-neutral-950">
+              {adminAwaitingOtp ? 'Admin Verification Code' : roleTitle}
+            </h1>
+            <p className="text-xs text-neutral-500">
+              {adminAwaitingOtp
+                ? 'Enter the 6-digit one-time code to confirm your administrative access.'
+                : `Enter your credentials to access the ${currentRoleConfig?.title.toLowerCase()} portal.`}
+            </p>
+          </div>
+
+          {/* Admin Mock OTP Step */}
+          {adminAwaitingOtp ? (
+            <form onSubmit={handleVerifyOtp} className="space-y-4">
+              <div className="space-y-1.5">
+                <label
+                  htmlFor="admin-otp-input"
+                  className="block text-xs font-bold text-neutral-900"
+                >
+                  6-Digit OTP Code
+                </label>
+                <input
+                  id="admin-otp-input"
+                  type="text"
+                  maxLength={6}
+                  value={otpInput}
+                  onChange={(e) => {
+                    setOtpInput(e.target.value);
+                    setOtpError('');
+                  }}
+                  placeholder="123456"
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-neutral-300 focus:outline-none focus:border-neutral-950 font-mono text-center tracking-widest text-lg font-bold"
+                  autoFocus
+                />
+                <p className="text-[11px] text-neutral-400">
+                  Demo hint: Use verification code <span className="font-mono font-bold text-neutral-700">{DEMO_ADMIN_OTP}</span>
+                </p>
+              </div>
+
+              {otpError && (
+                <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-red-900 text-xs font-medium">
+                  {otpError}
+                </div>
+              )}
+
+              <button
+                type="submit"
+                className="w-full flex items-center justify-center gap-2 px-5 py-3 rounded-xl font-bold text-sm bg-[#FFC20E] text-neutral-950 hover:bg-[#e5ae0b] transition-colors"
+              >
+                <span>Verify & Sign in</span>
+                <ArrowRight className="w-4 h-4" />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setAdminAwaitingOtp(false)}
+                className="w-full text-center text-xs font-semibold text-neutral-500 hover:text-neutral-950"
+              >
+                Change login credentials
+              </button>
+            </form>
+          ) : (
+            /* Regular Credentials Form */
+            <form onSubmit={handleSignIn} className="space-y-4">
+              <div className="space-y-1.5">
+                <label
+                  htmlFor="login-email"
+                  className="block text-xs font-bold text-neutral-900"
+                >
+                  Email Address
+                </label>
+                <input
+                  id="login-email"
+                  type="email"
+                  autoComplete="email"
+                  value={email}
+                  onChange={(e) => {
+                    setEmail(e.target.value);
+                    setErrorMsg('');
+                  }}
+                  placeholder={`e.g. ${demoAccountInfo.email}`}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-neutral-300 focus:outline-none focus:border-neutral-950 text-sm"
+                  required
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label
+                  htmlFor="login-password"
+                  className="block text-xs font-bold text-neutral-900"
+                >
+                  Password
+                </label>
+                <div className="relative">
+                  <input
+                    id="login-password"
+                    type={showPassword ? 'text' : 'password'}
+                    autoComplete="current-password"
+                    value={password}
+                    onChange={(e) => {
+                      setPassword(e.target.value);
+                      setErrorMsg('');
+                    }}
+                    placeholder="Enter password"
+                    className="w-full px-3.5 py-2.5 pr-10 rounded-xl border border-neutral-300 focus:outline-none focus:border-neutral-950 text-sm"
+                    required
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-700"
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  >
+                    {showPassword ? (
+                      <EyeOff className="w-4 h-4" />
+                    ) : (
+                      <Eye className="w-4 h-4" />
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {errorMsg && (
+                <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-red-900 text-xs font-medium">
+                  {errorMsg}
+                </div>
+              )}
+
+              {/* Exactly ONE yellow primary button per page */}
+              <button
+                type="submit"
+                className="w-full flex items-center justify-center gap-2 px-5 py-3 rounded-xl font-bold text-sm bg-[#FFC20E] text-neutral-950 hover:bg-[#e5ae0b] transition-colors"
+              >
+                <span>Sign in</span>
+                <ArrowRight className="w-4 h-4" />
+              </button>
+
+              {/* Applicant page specific: "New here? Create account" */}
+              {selectedRole === 'applicant' && (
+                <div className="text-center pt-2">
+                  <button
+                    type="button"
+                    onClick={onStartPublicApplication}
+                    className="text-xs font-semibold text-neutral-700 hover:text-neutral-950 underline underline-offset-2"
+                  >
+                    New here? Create account
+                  </button>
+                </div>
+              )}
+
+              {/* Collapsible Demo credentials box */}
+              <div className="pt-2 border-t border-neutral-100">
+                <button
+                  type="button"
+                  onClick={() => setShowDemoCreds(!showDemoCreds)}
+                  className="w-full flex items-center justify-between text-xs text-neutral-500 hover:text-neutral-900 font-medium py-1"
+                >
+                  <span className="flex items-center gap-1.5">
+                    <KeyRound className="w-3.5 h-3.5 text-neutral-400" />
+                    <span>Demo credentials</span>
+                  </span>
+                  {showDemoCreds ? (
+                    <ChevronUp className="w-3.5 h-3.5" />
+                  ) : (
+                    <ChevronDown className="w-3.5 h-3.5" />
+                  )}
+                </button>
+
+                {showDemoCreds && (
+                  <div className="mt-2 p-3 bg-neutral-50 border border-neutral-200 rounded-xl space-y-2 text-xs">
+                    <div className="space-y-1">
+                      <p className="text-neutral-600">
+                        <span className="font-semibold text-neutral-900">Email:</span>{' '}
+                        <code className="font-mono bg-white px-1.5 py-0.5 rounded border border-neutral-200">
+                          {demoAccountInfo.email}
+                        </code>
+                      </p>
+                      <p className="text-neutral-600">
+                        <span className="font-semibold text-neutral-900">Password:</span>{' '}
+                        <code className="font-mono bg-white px-1.5 py-0.5 rounded border border-neutral-200">
+                          {demoAccountInfo.password}
+                        </code>
+                      </p>
+                      <p className="text-[11px] text-neutral-500 italic">
+                        {demoAccountInfo.subtitle}
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={handleUseDemoAccount}
+                      className="w-full py-1.5 rounded-lg border border-neutral-300 bg-white hover:bg-neutral-100 font-semibold text-neutral-900 text-xs transition-colors"
+                    >
+                      Use demo account
+                    </button>
+                  </div>
+                )}
+              </div>
+            </form>
+          )}
+
+          <div className="text-center pt-2">
             <button
               type="button"
-              onClick={() => setResetBanner('')}
-              className="text-xs font-semibold text-white underline shrink-0"
+              onClick={handleBackToRoles}
+              className="text-xs font-semibold text-neutral-500 hover:text-neutral-950"
             >
-              Dismiss
+              ← Back to roles
             </button>
           </div>
-        )}
-
-        {/* Editorial Hero Section with ONE offset #FFC20E background block */}
-        <section className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-center">
-          <div className="lg:col-span-7 space-y-5">
-            <p className="section-kicker">
-              MAATRAM ONE (M-ONE) · ROLE-BASED PORTAL
-            </p>
-            <h1 className="font-display text-3xl sm:text-5xl font-extrabold text-neutral-950 tracking-[-0.02em] leading-[1.2]">
-              One scholar journey, from first application to{' '}
-              <span className="heading-highlight">alumni</span> anchor.
-            </h1>
-            <p className="text-sm sm:text-base text-neutral-600 max-w-2xl leading-relaxed">
-              Sign in with a role workspace below to inspect scoped applicant tracking, student academics and volunteering proof, anchor cohort stewardship, or admin verification and replayable audit logs.
-            </p>
-
-            {/* Exactly ONE yellow primary CTA on this screen */}
-            <div className="flex flex-wrap items-center gap-3 pt-1">
-              <button
-                type="button"
-                onClick={onStartGuidedDemo}
-                className="inline-flex items-center gap-2 px-5 py-3 rounded-xl text-sm font-semibold bg-[#FFC20E] text-neutral-950 hover:bg-[#e5ae0b] transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-950"
-              >
-                <Play className="w-4 h-4 fill-current" aria-hidden="true" />
-                <span>Start 3-minute demo</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={onStartPublicApplication}
-                className="inline-flex items-center gap-2 px-5 py-3 rounded-xl text-sm font-semibold border border-neutral-950 text-neutral-950 bg-white hover:bg-neutral-50 transition-colors"
-              >
-                <UserPlus className="w-4 h-4" aria-hidden="true" />
-                <span>New here? Start your application</span>
-              </button>
-            </div>
-          </div>
-
-          {/* Right Hero Image framed over ONE #FFC20E offset block */}
-          <div className="lg:col-span-5 relative pb-3 pr-3">
-            <div
-              aria-hidden="true"
-              className="absolute inset-0 translate-x-3 translate-y-3 bg-[#FFC20E] rounded-2xl"
-            />
-            <div className="relative bg-white border border-neutral-950 rounded-2xl overflow-hidden shadow-xs">
-              <img
-                src="/src/assets/images/maatram_scholars_hero_1795172873424.jpg"
-                alt="Maatram scholars studying together around notebooks and a laptop"
-                className="w-full aspect-[4/3] object-cover"
-              />
-              <div className="bg-neutral-950 text-white px-4 py-3 flex items-center justify-between gap-2 text-xs">
-                <span className="font-medium">
-                  Cycle 2026–27 Open · Deadline 30 Dec 2026
-                </span>
-                <span className="font-mono text-[11px] text-neutral-300 tabular-nums">
-                  12,480+ applicants
-                </span>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {/* Four Role Login Cards */}
-        <section className="space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-2 border-b border-neutral-200 pb-3">
-            <div>
-              <p className="section-kicker">ROLE SIGN-IN · SYNTHETIC DEMO ACCOUNTS</p>
-              <h2 className="font-display text-2xl font-bold text-neutral-950 mt-1">
-                Choose your Maatram One workspace
-              </h2>
-            </div>
-            <p className="text-xs text-neutral-500">
-              Each account opens strictly scoped navigation and data.
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5">
-            {ROLE_ORDER.map((role) => {
-              const acc = DEMO_ACCOUNTS[role];
-              const creds = credentials[role];
-              const err = errors[role];
-
-              return (
-                <form
-                  key={role}
-                  onSubmit={(e) => handleRoleSignIn(e, role)}
-                  data-testid={`login-card-${role}`}
-                  className="bg-white border border-neutral-200 rounded-2xl p-5 flex flex-col justify-between gap-4 shadow-xs"
-                >
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="bg-neutral-950 text-white rounded-full px-2.5 py-0.5 text-[11px] font-semibold">
-                        {ROLE_LABELS[role]}
-                      </span>
-                      <span className="text-[11px] font-mono text-neutral-500">
-                        {acc.personId}
-                      </span>
-                    </div>
-
-                    <div>
-                      <h3 className="font-display text-xl font-bold text-neutral-950">
-                        {acc.name}
-                      </h3>
-                      <p className="text-xs font-medium text-neutral-800 mt-0.5 stat-underline">
-                        {acc.subtitle}
-                      </p>
-                    </div>
-
-                    <p className="text-xs text-neutral-600 leading-relaxed">
-                      {acc.description}
-                    </p>
-
-                    <div className="space-y-2 pt-1">
-                      <div>
-                        <label
-                          htmlFor={`login-email-${role}`}
-                          className="block text-[11px] font-bold uppercase tracking-[0.12em] text-neutral-500 mb-1"
-                        >
-                          Email
-                        </label>
-                        <input
-                          id={`login-email-${role}`}
-                          type="email"
-                          value={creds.email}
-                          onChange={(e) =>
-                            handleFieldChange(role, 'email', e.target.value)
-                          }
-                          className="w-full border border-neutral-300 rounded-lg px-2.5 py-1.5 text-xs font-medium text-neutral-900 bg-white focus:outline-none focus:ring-2 focus:ring-neutral-950"
-                        />
-                      </div>
-
-                      <div>
-                        <label
-                          htmlFor={`login-password-${role}`}
-                          className="block text-[11px] font-bold uppercase tracking-[0.12em] text-neutral-500 mb-1"
-                        >
-                          Password
-                        </label>
-                        <input
-                          id={`login-password-${role}`}
-                          type="password"
-                          value={creds.password}
-                          onChange={(e) =>
-                            handleFieldChange(role, 'password', e.target.value)
-                          }
-                          className="w-full border border-neutral-300 rounded-lg px-2.5 py-1.5 text-xs font-medium text-neutral-900 bg-white focus:outline-none focus:ring-2 focus:ring-neutral-950"
-                        />
-                      </div>
-
-                      <p className="text-[11px] font-semibold text-neutral-500 tabular-nums flex items-center gap-1">
-                        {role === 'admin' ? (
-                          <>
-                            <ShieldCheck className="w-3 h-3 shrink-0" aria-hidden="true" />
-                            <span>
-                              Prefilled · Next screen OTP:{' '}
-                              <span className="tracking-[0.08em] font-bold text-neutral-700">
-                                123456
-                              </span>
-                            </span>
-                          </>
-                        ) : (
-                          <>
-                            <KeyRound className="w-3 h-3 shrink-0" aria-hidden="true" />
-                            <span>Demo hint prefilled</span>
-                          </>
-                        )}
-                      </p>
-                    </div>
-
-                    {err && (
-                      <p role="alert" className="text-xs text-red-700 font-medium">
-                        {err}
-                      </p>
-                    )}
-                  </div>
-
-                  <button
-                    type="submit"
-                    className="w-full inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl text-xs font-semibold bg-neutral-950 text-white hover:bg-neutral-800 transition-colors"
-                  >
-                    <span>
-                      {role === 'admin'
-                        ? 'Continue to OTP'
-                        : `Sign in as ${ROLE_LABELS[role]}`}
-                    </span>
-                    <ArrowRight className="w-3.5 h-3.5" aria-hidden="true" />
-                  </button>
-                </form>
-              );
-            })}
-          </div>
-        </section>
+        </div>
       </main>
 
       <footer className="border-t border-neutral-200 bg-white py-4 px-4 sm:px-6">
-        <div className="max-w-[1280px] mx-auto flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-neutral-500">
-          <span>
-            Maatram One (M-one) · Student Lifecycle Platform · MH26-05
-          </span>
-          <span>
-            Synthetic demo accounts only · Event-sourced in browser localStorage
-          </span>
+        <div className="max-w-[1280px] mx-auto text-center text-xs text-neutral-400">
+          MH26-05
         </div>
       </footer>
     </div>

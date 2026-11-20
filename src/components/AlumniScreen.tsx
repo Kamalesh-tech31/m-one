@@ -41,6 +41,13 @@ export const AlumniScreen: React.FC<AlumniScreenProps> = ({
   const [newSource, setNewSource] = useState<CareerSource>('self-reported');
   const [bannerMsg, setBannerMsg] = useState('');
 
+  useEffect(() => {
+    if (bannerMsg) {
+      const timer = setTimeout(() => setBannerMsg(''), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [bannerMsg]);
+
   const queryNorm = useMemo(
     () => normalizeCompanyName(companyQuery),
     [companyQuery]
@@ -109,30 +116,19 @@ export const AlumniScreen: React.FC<AlumniScreenProps> = ({
 
   return (
     <div className="space-y-8">
-      {/* Header with ONE offset #FFC20E block */}
-      <div className="relative pr-2 pb-2">
-        <div
-          aria-hidden="true"
-          className="absolute inset-0 translate-x-2 translate-y-2 bg-[#FFC20E] rounded-2xl"
-        />
-        <section className="relative bg-white border border-neutral-950 rounded-2xl p-6 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-          <div className="space-y-1.5">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="bg-neutral-950 text-white rounded-full px-3 py-0.5 text-[11px] font-bold uppercase tracking-[0.12em]">
-                {readOnly ? 'Alumni Directory (Read-Only)' : 'Alumni Career Tracker'}
-              </span>
-              <span className="text-xs font-semibold tabular-nums text-neutral-600">
-                {alumniList.length} tracked alumni profiles
-              </span>
-            </div>
-            <h1 className="font-display text-2xl sm:text-3xl font-extrabold text-neutral-950 tracking-[-0.02em]">
-              Replayable Career <span className="heading-highlight">History</span> & Company Query
-            </h1>
-            <p className="text-sm text-neutral-600">
-              Current job profiles are built by replaying career events with source attribution and deterministic company name normalization.
-            </p>
-          </div>
-        </section>
+      {/* Page Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-neutral-200 pb-5">
+        <div>
+          <h1 className="font-display text-2xl sm:text-3xl font-extrabold text-neutral-950 tracking-[-0.02em]">
+            Alumni Career Tracker
+          </h1>
+          <p className="text-sm text-neutral-600 mt-1">
+            Query alumni by employer and inspect normalized career timelines.
+          </p>
+        </div>
+        <div className="text-xs font-semibold tabular-nums text-neutral-600 self-start sm:self-center">
+          {alumniList.length} tracked alumni profiles
+        </div>
       </div>
 
       {bannerMsg && (

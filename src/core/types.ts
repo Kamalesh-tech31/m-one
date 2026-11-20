@@ -86,6 +86,8 @@ export type EventType =
   | 'DOCUMENT_UPLOADED'
   | 'JOIN_CODE_REDEEMED'
   | 'STUDENT_PROFILE_UPDATED'
+  | 'PROFILE_UPDATED'
+  | 'profile.updated'
   | 'CGPA_RECORDED'
   | 'ACHIEVEMENT_ADDED'
   | 'DIFFICULTY_FLAG_UPDATED'
@@ -243,6 +245,7 @@ export interface PersonProfile {
   careerHistory: CareerHistoryEntry[];
   currentCompany?: string;
   currentRoleTitle?: string;
+  photoUrl?: string;
   statusHistory: StatusHistoryEntry[];
 }
 

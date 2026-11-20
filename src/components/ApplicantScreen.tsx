@@ -26,11 +26,15 @@ import {
   validateUploadFile,
 } from '../core/validation';
 
+export type ApplicantTab = 'application' | 'form' | 'documents' | 'history';
+
 interface ApplicantScreenProps {
   scoped: ApplicantScopedView;
   actorName: string;
+  activeTab?: ApplicantTab;
   onUpdateSessionName: (name: string) => void;
   onAppend: (input: AppendEventInput) => void;
+  showToast: (msg: string) => void;
 }
 
 const STAGES: Array<{ id: LifecycleStage; label: string }> = [
@@ -52,8 +56,10 @@ const REQUIRED_DOC_OPTIONS = [
 export const ApplicantScreen: React.FC<ApplicantScreenProps> = ({
   scoped,
   actorName,
+  activeTab = 'application',
   onUpdateSessionName,
   onAppend,
+  showToast,
 }) => {
   const activePerson = scoped.ownProfile;
   const activeCycle = scoped.activeCycle;
@@ -64,11 +70,9 @@ export const ApplicantScreen: React.FC<ApplicantScreenProps> = ({
       ? activePerson.region
       : DISTRICTS_8[0]
   );
-  const [bannerMsg, setBannerMsg] = useState<string>('');
   const [docLabel, setDocLabel] = useState<string>(REQUIRED_DOC_OPTIONS[0]);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [uploadError, setUploadError] = useState<string>('');
-  const [uploadSuccess, setUploadSuccess] = useState<string>('');
 
   const {
     register,
@@ -97,7 +101,7 @@ export const ApplicantScreen: React.FC<ApplicantScreenProps> = ({
           : DISTRICTS_8[0]
       );
     }
-  }, [activePerson?.personId, activePerson?.applicationAnswers, activePerson?.email, activePerson?.region, reset]);
+  }, [activePerson, reset]);
 
   if (!activePerson) {
     return (
@@ -128,12 +132,12 @@ export const ApplicantScreen: React.FC<ApplicantScreenProps> = ({
         answers: values,
       },
     });
-    setBannerMsg('Draft saved to append-only event log.');
+    showToast('Draft saved successfully.');
   };
 
   const onValidSubmit = (values: ApplicationAnswers) => {
     if (!isCycleOpen) {
-      setBannerMsg('Application cycle 2026 is closed.');
+      showToast('Application cycle 2026 is closed.');
       return;
     }
     const actor = values.fullName.trim() || actorName;
@@ -151,46 +155,7 @@ export const ApplicantScreen: React.FC<ApplicantScreenProps> = ({
         answers: values,
       },
     });
-    setBannerMsg('Application submitted and recorded in event log.');
-  };
-
-  const handleAdvanceStageDemo = () => {
-    const currentIndex = STAGES.findIndex((s) => s.id === activePerson.stage);
-    if (currentIndex === -1 || currentIndex >= STAGES.length - 1) return;
-    const nextStage = STAGES[currentIndex + 1];
-
-    if (nextStage.id === 'selected') {
-      const code = `MTRM-2026-${String(1000 + ((scoped.eventCount * 137) % 8999))}`;
-      const expiresAt = new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString();
-      onAppend({
-        type: 'APPLICANT_SELECTED',
-        personId: activePerson.personId,
-        cycleId: activePerson.cycleId,
-        actor: actorName,
-        payload: {
-          joinCode: code,
-          joinCodeExpiresAt: expiresAt,
-          reason: 'Advanced via stage stepper walkthrough.',
-          college: 'Pending Enrollment',
-          degree: 'Undergraduate Cohort',
-        },
-      });
-      setBannerMsg(
-        `Selected! One-time join code ${code} issued (valid 48 hours).`
-      );
-    } else {
-      onAppend({
-        type: 'STAGE_ADVANCED',
-        personId: activePerson.personId,
-        cycleId: activePerson.cycleId,
-        actor: actorName,
-        payload: {
-          stage: nextStage.id,
-          reason: `Progressed to ${nextStage.label}.`,
-        },
-      });
-      setBannerMsg(`Stage updated to ${nextStage.label}.`);
-    }
+    showToast('Application submitted successfully.');
   };
 
   const runSimulatedSignedUpload = (file: {
@@ -199,7 +164,6 @@ export const ApplicantScreen: React.FC<ApplicantScreenProps> = ({
     size: number;
   }) => {
     setUploadError('');
-    setUploadSuccess('');
 
     const check = validateUploadFile(file);
     if (!check.valid) {
@@ -229,9 +193,7 @@ export const ApplicantScreen: React.FC<ApplicantScreenProps> = ({
               )}`,
             },
           });
-          setUploadSuccess(
-            `Uploaded ${docLabel} (${file.name}, ${formatBytes(file.size)}) via signed link.`
-          );
+          showToast(`Uploaded ${docLabel} (${file.name}).`);
           window.setTimeout(() => setUploadProgress(null), 450);
         }
       }, (index + 1) * 120);
@@ -253,258 +215,207 @@ export const ApplicantScreen: React.FC<ApplicantScreenProps> = ({
 
   return (
     <div className="space-y-8">
-      {/* Header Card with ONE offset #FFC20E block */}
-      <div className="relative pr-2 pb-2">
-        <div
-          aria-hidden="true"
-          className="absolute inset-0 translate-x-2 translate-y-2 bg-[#FFC20E] rounded-2xl"
-        />
-        <section className="relative bg-white border border-neutral-950 rounded-2xl p-6 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-          <div className="space-y-1.5">
-            <div className="flex flex-wrap items-center gap-2.5">
-              <span className="bg-neutral-950 text-white rounded-full px-3 py-0.5 text-[11px] font-bold uppercase tracking-[0.12em]">
-                Cycle 2026–27
-              </span>
-              <span className="text-xs font-semibold tabular-nums text-neutral-600">
-                Deadline: {deadlineFormatted} · {isCycleOpen ? 'Open' : 'Closed'}
-              </span>
-            </div>
-            <h1 className="font-display text-2xl sm:text-3xl font-extrabold text-neutral-950 tracking-[-0.02em]">
-              Your <span className="heading-highlight">Application</span> Portal
-            </h1>
-            <p className="text-sm text-neutral-600">
-              Signed in as <strong>{activePerson.name}</strong> ({activePerson.personId}) · Status:{' '}
-              <span className="font-mono uppercase text-xs font-semibold text-neutral-950">
-                {activePerson.status}
-              </span>
-            </p>
-          </div>
-
-          <div className="bg-neutral-950 text-white rounded-xl px-4 py-3 shrink-0">
-            <p className="text-[10px] font-mono uppercase tracking-wider text-neutral-400">
-              Applicant ID
-            </p>
-            <p className="text-lg font-mono font-bold tabular-nums stat-underline">
-              {activePerson.personId}
-            </p>
-          </div>
-        </section>
+      {/* Page Header (No yellow offset block) */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-neutral-200 pb-5">
+        <div>
+          <h1 className="font-display font-extrabold text-2xl sm:text-3xl tracking-tight text-neutral-950">
+            {activeTab === 'application' && 'Application Status'}
+            {activeTab === 'form' && 'Scholarship Application Form'}
+            {activeTab === 'documents' && 'Verification Documents'}
+            {activeTab === 'history' && 'Status History'}
+          </h1>
+          <p className="text-xs sm:text-sm text-neutral-600 mt-1">
+            {activeTab === 'application' &&
+              `Cycle 2026–27 · Deadline: ${deadlineFormatted} (${isCycleOpen ? 'Open' : 'Closed'})`}
+            {activeTab === 'form' &&
+              'Provide accurate household and academic details to support your scholarship review.'}
+            {activeTab === 'documents' &&
+              'Upload supporting marksheets and income certificates for verifier review.'}
+            {activeTab === 'history' &&
+              'Timeline of all stage advances and official actions recorded in your profile.'}
+          </p>
+        </div>
       </div>
 
-      {bannerMsg && (
-        <div
-          role="status"
-          className="bg-neutral-950 text-white rounded-xl px-4 py-3 text-sm flex items-center justify-between gap-4"
-        >
-          <span>{bannerMsg}</span>
-          <button
-            type="button"
-            onClick={() => setBannerMsg('')}
-            className="text-xs font-semibold text-white underline shrink-0"
-          >
-            Dismiss
-          </button>
-        </div>
-      )}
+      {/* 1. APPLICATION VIEW: Stepper, Join Code, Verifiers */}
+      {activeTab === 'application' && (
+        <div className="space-y-6">
+          <section className="bg-white border border-neutral-200 rounded-2xl p-6 sm:p-8 space-y-6 shadow-xs">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-neutral-100 pb-4">
+              <div>
+                <h2 className="font-display text-lg font-bold text-neutral-950">
+                  Selection Pipeline
+                </h2>
+                <p className="text-xs text-neutral-500">
+                  Current stage:{' '}
+                  <span className="font-semibold text-neutral-950">
+                    {activePerson.stage === 'rejected'
+                      ? 'Rejected'
+                      : STAGES[currentStageIndex]?.label || activePerson.stage}
+                  </span>
+                  {activePerson.shortlisted && ' · Shortlisted'}
+                </p>
+              </div>
 
-      {/* Selection Pipeline Stepper */}
-      <section className="bg-white border border-neutral-200 rounded-2xl p-6 space-y-5 shadow-xs">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-          <div className="space-y-1">
-            <p className="section-kicker">APPLICATION TRACKER</p>
-            <div className="flex flex-wrap items-center gap-2">
-              <h2 className="font-display text-xl font-bold text-neutral-950">
-                Selection Pipeline
-              </h2>
               {activePerson.addressVerificationMode && (
-                <span className="bg-neutral-950 text-white rounded-full px-2.5 py-0.5 text-xs font-semibold inline-flex items-center gap-1">
+                <span className="bg-neutral-100 text-neutral-800 rounded-full px-3 py-1 text-xs font-semibold inline-flex items-center gap-1.5 self-start sm:self-auto">
                   <ShieldCheck className="w-3.5 h-3.5" aria-hidden="true" />
-                  <span>Address Mode: {activePerson.addressVerificationMode}</span>
+                  <span>Mode: {activePerson.addressVerificationMode}</span>
                 </span>
               )}
             </div>
-            <p className="text-xs text-neutral-600">
-              Current stage:{' '}
-              <span className="font-semibold text-neutral-950">
-                {activePerson.stage === 'rejected'
-                  ? 'Rejected'
-                  : STAGES[currentStageIndex]?.label || activePerson.stage}
-              </span>
-              {activePerson.shortlisted && ' · Shortlisted'}
-            </p>
-          </div>
 
-          {activePerson.stage !== 'selected' &&
-            activePerson.stage !== 'rejected' && (
-              <button
-                type="button"
-                onClick={handleAdvanceStageDemo}
-                className="px-4 py-2 rounded-xl text-xs font-semibold border border-neutral-950 text-neutral-950 bg-white hover:bg-neutral-50 transition-colors whitespace-nowrap shrink-0 self-start sm:self-auto"
+            {activePerson.stage === 'rejected' ? (
+              <div
+                role="alert"
+                className="p-4 rounded-xl border border-red-300 bg-red-50 text-red-950 text-sm space-y-1"
               >
-                Demo: Advance Stage →
-              </button>
+                <p className="font-bold">Application Not Selected (Admin Decision)</p>
+                <p>
+                  <span className="font-semibold">Rejection reason: </span>
+                  {activePerson.rejectionReason || 'Not specified'}
+                </p>
+              </div>
+            ) : (
+              /* Stepper: completed steps are small check circle on a thin black line */
+              <div className="py-4">
+                <ol className="relative flex flex-col md:flex-row md:items-center justify-between gap-6 md:gap-2">
+                  {/* Thin connecting line across steps */}
+                  <div
+                    aria-hidden="true"
+                    className="hidden md:block absolute top-4 left-6 right-6 h-[1px] bg-neutral-950 -z-0"
+                  />
+
+                  {STAGES.map((stage, idx) => {
+                    const isDone = idx < currentStageIndex;
+                    const isCurrent = idx === currentStageIndex;
+
+                    return (
+                      <li
+                        key={stage.id}
+                        className="relative z-10 flex md:flex-col items-center gap-3 md:gap-2 text-left md:text-center flex-1"
+                      >
+                        {/* Circle Indicator */}
+                        <div
+                          className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 transition-colors ${
+                            isCurrent
+                              ? 'bg-[#FFC20E] text-neutral-950 font-bold ring-4 ring-neutral-100'
+                              : isDone
+                                ? 'bg-white border border-neutral-950 text-neutral-950'
+                                : 'bg-neutral-100 border border-neutral-300 text-neutral-400'
+                          }`}
+                        >
+                          {isDone ? (
+                            <Check className="w-4 h-4 stroke-[2.5]" />
+                          ) : (
+                            <span className="text-xs font-mono font-bold">
+                              {idx + 1}
+                            </span>
+                          )}
+                        </div>
+
+                        <div>
+                          <p
+                            className={`text-xs font-bold leading-tight ${
+                              isCurrent
+                                ? 'text-neutral-950'
+                                : isDone
+                                  ? 'text-neutral-800'
+                                  : 'text-neutral-400'
+                            }`}
+                          >
+                            {stage.label}
+                          </p>
+                          {isCurrent && (
+                            <p className="text-[11px] text-neutral-500 font-medium">
+                              In progress
+                            </p>
+                          )}
+                          {isDone && (
+                            <p className="text-[11px] text-neutral-500 font-medium">
+                              Completed
+                            </p>
+                          )}
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ol>
+              </div>
             )}
-        </div>
 
-        {activePerson.stage === 'rejected' ? (
-          <div
-            role="alert"
-            className="p-4 rounded-xl border border-red-300 bg-red-50 text-red-950 text-sm space-y-1"
-          >
-            <p className="font-bold">Application Not Selected (Admin Decision)</p>
-            <p>
-              <span className="font-semibold">Rejection reason: </span>
-              {activePerson.rejectionReason || 'Not specified'}
-            </p>
-          </div>
-        ) : (
-          <ol className="grid grid-cols-1 sm:grid-cols-5 gap-3">
-            {STAGES.map((stage, idx) => {
-              const isDone = idx < currentStageIndex;
-              const isCurrent = idx === currentStageIndex;
+            {/* Address Verification Tracker Strip */}
+            <div className="border border-neutral-200 bg-neutral-50 rounded-xl px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-xs">
+              <div>
+                <span className="font-semibold text-neutral-950">
+                  Address Verification:{' '}
+                </span>
+                {activePerson.addressVerificationMode ? (
+                  <span className="text-neutral-800">
+                    {activePerson.addressVerificationMode} mode assigned by Admin
+                  </span>
+                ) : (
+                  <span className="text-neutral-500">
+                    Awaiting verification review
+                  </span>
+                )}
+              </div>
+              <span className="font-mono text-[11px] text-neutral-600 shrink-0">
+                Verifiers: {activePerson.verifiers.teleVerifierName || 'Meera'} (Tele) ·{' '}
+                {activePerson.verifiers.physicalVerifierName || 'Priya'} (Physical)
+              </span>
+            </div>
 
-              const verifierMeta =
-                stage.id === 'tele_verification'
-                  ? {
-                      name: activePerson.verifiers.teleVerifierName || 'Meera',
-                      status: activePerson.verifiers.teleStatus,
-                    }
-                  : stage.id === 'physical_verification'
-                    ? {
-                        name:
-                          activePerson.verifiers.physicalVerifierName || 'Priya',
-                        status: activePerson.verifiers.physicalStatus,
-                      }
-                    : null;
-
-              return (
-                <li
-                  key={stage.id}
-                  className={`rounded-xl border px-3.5 py-3.5 flex flex-col justify-between gap-2 ${
-                    isCurrent
-                      ? 'border-neutral-950 bg-white border-b-4 border-b-[#FFC20E]'
-                      : isDone
-                        ? 'border-neutral-950 bg-neutral-950 text-white'
-                        : 'border-neutral-200 bg-neutral-50 text-neutral-600'
-                  }`}
-                >
-                  <div className="flex items-center gap-2.5">
-                    <span
-                      className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-mono font-bold shrink-0 ${
-                        isCurrent
-                          ? 'bg-[#FFC20E] text-neutral-950'
-                          : isDone
-                            ? 'bg-white text-neutral-950'
-                            : 'bg-neutral-200 text-neutral-600'
-                      }`}
-                    >
-                      {isDone ? <Check className="w-3.5 h-3.5" /> : idx + 1}
-                    </span>
-                    <span className="text-xs font-semibold leading-tight">
-                      {stage.label}
+            {/* Join Code Banner on Selection */}
+            {activePerson.stage === 'selected' && activePerson.joinCode && (
+              <div className="border border-neutral-950 bg-neutral-950 text-white rounded-xl p-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <KeyRound className="w-4 h-4 text-[#FFC20E]" aria-hidden="true" />
+                    <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-neutral-300">
+                      Workspace Join Code (Valid 48 hours)
                     </span>
                   </div>
-
-                  {verifierMeta && (
-                    <div
-                      className={`text-[11px] flex items-center gap-1 pt-1.5 border-t ${
-                        isDone
-                          ? 'border-neutral-800 text-neutral-300'
-                          : 'border-neutral-200 text-neutral-700'
-                      }`}
-                    >
-                      <UserCheck className="w-3 h-3 shrink-0" aria-hidden="true" />
-                      <span className="truncate">
-                        Verifier: <strong>{verifierMeta.name}</strong> ·{' '}
-                        {verifierMeta.status}
-                      </span>
-                    </div>
-                  )}
-                </li>
-              );
-            })}
-          </ol>
-        )}
-
-        {/* Address Verification Tracker Strip */}
-        <div className="border border-neutral-200 bg-neutral-50 rounded-xl px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-xs">
-          <div>
-            <span className="font-semibold text-neutral-950">
-              Address Proof & Verification Mode:{' '}
-            </span>
-            {activePerson.addressVerificationMode ? (
-              <span className="font-semibold text-neutral-950">
-                {activePerson.addressVerificationMode} (assigned by Admin)
-              </span>
-            ) : activePerson.documents.some((d) => d.label === 'Address Proof') ? (
-              <span className="text-neutral-700">
-                Address Proof submitted — awaiting Admin mode choice (Online panel or Physical verification)
-              </span>
-            ) : (
-              <span className="text-neutral-500">
-                Upload Address Proof so Admin can choose Online panel or Physical verification
-              </span>
-            )}
-          </div>
-          <span className="font-mono text-[11px] text-neutral-600 shrink-0">
-            Alumni verifiers: {activePerson.verifiers.teleVerifierName || 'Meera'} (Tele) ·{' '}
-            {activePerson.verifiers.physicalVerifierName || 'Priya'} (Physical)
-          </span>
-        </div>
-
-        {/* Join Code Banner on Selection */}
-        {activePerson.stage === 'selected' && activePerson.joinCode && (
-          <div className="border border-neutral-950 bg-neutral-950 text-white rounded-xl p-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-            <div className="space-y-1">
-              <div className="flex items-center gap-2">
-                <KeyRound className="w-4 h-4 text-[#FFC20E]" aria-hidden="true" />
-                <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-neutral-300">
-                  One-Time Workspace Join Code (Expires in 48 hours)
+                  <p className="text-2xl font-bold tracking-[0.08em] tabular-nums text-white">
+                    {activePerson.joinCode}
+                  </p>
+                  <p className="text-xs text-neutral-300 font-semibold tabular-nums pt-1">
+                    Valid until:{' '}
+                    {activePerson.joinCodeExpiresAt
+                      ? format(
+                          new Date(activePerson.joinCodeExpiresAt),
+                          'dd MMM yyyy, HH:mm'
+                        )
+                      : '48h from selection'}
+                    {activePerson.anchorId
+                      ? ` · Redeemed by Anchor ${activePerson.anchorId}`
+                      : ' · Share with your Anchor'}
+                  </p>
+                </div>
+                <span className="bg-white text-neutral-950 rounded-full px-3 py-1 text-xs font-bold whitespace-nowrap shrink-0 self-start sm:self-center">
+                  {activePerson.anchorId ? 'Onboarded to Roster' : 'Ready to Redeem'}
                 </span>
               </div>
-              <p className="text-2xl font-bold tracking-[0.08em] tabular-nums text-white stat-underline">
-                {activePerson.joinCode}
-              </p>
-              <p className="text-xs text-neutral-300 font-semibold tabular-nums pt-1">
-                Valid until:{' '}
-                {activePerson.joinCodeExpiresAt
-                  ? format(
-                      new Date(activePerson.joinCodeExpiresAt),
-                      'dd MMM yyyy, HH:mm'
-                    )
-                  : '48h from selection'}
-                {activePerson.anchorId
-                  ? ` · Redeemed by Anchor ${activePerson.anchorId}`
-                  : ' · Share with your Anchor in Anchor Workspace'}
-              </p>
-            </div>
-            <span className="bg-white text-neutral-950 rounded-full px-3 py-1 text-xs font-bold whitespace-nowrap shrink-0 self-start sm:self-center">
-              {activePerson.anchorId ? 'Onboarded to Roster' : 'Ready to Redeem'}
-            </span>
-          </div>
-        )}
-      </section>
+            )}
+          </section>
+        </div>
+      )}
 
-      {/* Main Two-Column Grid: 7-Question Form (7 cols) + Documents & Timeline (5 cols) */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        {/* 7-Question Application Form (Exactly ONE yellow Primary CTA here) */}
+      {/* 2. FORM VIEW: 7-Question Scholarship Form */}
+      {activeTab === 'form' && (
         <form
           onSubmit={handleSubmit(onValidSubmit)}
-          className="lg:col-span-7 bg-white border border-neutral-200 rounded-2xl p-6 space-y-5 shadow-xs"
+          className="bg-white border border-neutral-200 rounded-2xl p-6 sm:p-8 space-y-6 shadow-xs max-w-3xl"
         >
           <div className="flex items-center justify-between border-b border-neutral-200 pb-3">
             <div>
-              <p className="section-kicker">CYCLE 2026–27 FORM</p>
-              <h2 className="font-display text-xl font-bold text-neutral-950 mt-0.5">
-                7-Question Application Form
+              <h2 className="font-display text-lg font-bold text-neutral-950">
+                Application Questions
               </h2>
               <p className="text-xs text-neutral-600">
-                Save a draft anytime or submit before {deadlineFormatted}.
+                Save a draft anytime or submit your application before {deadlineFormatted}.
               </p>
             </div>
-            <span className="bg-neutral-950 text-white rounded-full px-2.5 py-0.5 text-xs font-semibold font-mono">
-              {targetPersonId}
-            </span>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -694,7 +605,7 @@ export const ApplicantScreen: React.FC<ApplicantScreenProps> = ({
                 htmlFor="applicant-email"
                 className="block text-xs font-semibold text-neutral-800 mb-1"
               >
-                Contact Email (Synthetic)
+                Contact Email
               </label>
               <input
                 id="applicant-email"
@@ -727,156 +638,104 @@ export const ApplicantScreen: React.FC<ApplicantScreenProps> = ({
             )}
           </div>
 
-          <div className="flex flex-wrap items-center justify-end gap-3 pt-2 border-t border-neutral-200">
+          <div className="flex flex-wrap items-center justify-end gap-3 pt-4 border-t border-neutral-200">
             <button
               type="button"
               onClick={handleSaveDraft}
-              className="px-4 py-2 rounded-xl text-sm font-medium border border-neutral-950 text-neutral-950 bg-white hover:bg-neutral-50 transition-colors"
+              className="px-4 py-2.5 rounded-xl text-xs sm:text-sm font-semibold border border-neutral-950 text-neutral-950 bg-white hover:bg-neutral-50 transition-colors"
             >
               Save Draft
             </button>
             <button
               type="submit"
               disabled={!isCycleOpen}
-              className="px-5 py-2 rounded-xl text-sm font-semibold bg-[#FFC20E] text-neutral-950 hover:bg-[#e5ae0b] disabled:opacity-50 transition-colors"
+              className="px-6 py-2.5 rounded-xl text-xs sm:text-sm font-bold bg-[#FFC20E] text-neutral-950 hover:bg-[#e5ae0b] disabled:opacity-50 transition-colors"
             >
               Submit Application
             </button>
           </div>
         </form>
+      )}
 
-        {/* Right Column: Document Upload + Status History Timeline */}
-        <div className="lg:col-span-5 space-y-6">
-          <section className="bg-white border border-neutral-200 rounded-2xl p-6 space-y-4 shadow-xs">
-            <div className="border-b border-neutral-200 pb-3">
-              <p className="section-kicker">VERIFICATION UPLOADS</p>
-              <h2 className="font-display text-lg font-bold text-neutral-950 mt-0.5">
-                Verification Documents
-              </h2>
-              <p className="text-xs text-neutral-600">
-                10th/12th marksheet, income certificate, address proof, one house photo · PDF/JPG/PNG only · Max 5 MB
-              </p>
-            </div>
+      {/* 3. DOCUMENTS VIEW */}
+      {activeTab === 'documents' && (
+        <section className="bg-white border border-neutral-200 rounded-2xl p-6 sm:p-8 space-y-6 shadow-xs max-w-3xl">
+          <div className="border-b border-neutral-200 pb-3">
+            <h2 className="font-display text-lg font-bold text-neutral-950">
+              Upload Verification Documents
+            </h2>
+            <p className="text-xs text-neutral-600 mt-0.5">
+              10th/12th marksheet, income certificate, address proof, house photo · PDF/JPG/PNG only · Max 5 MB
+            </p>
+          </div>
 
-            <div className="flex flex-col sm:flex-row gap-2 min-w-0">
-              <label htmlFor="doc-type-label" className="sr-only">
-                Document category
-              </label>
-              <select
-                id="doc-type-label"
-                value={docLabel}
-                onChange={(e) => setDocLabel(e.target.value)}
-                className="w-full sm:flex-1 min-w-0 border border-neutral-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-neutral-950"
-              >
-                {REQUIRED_DOC_OPTIONS.map((opt) => (
-                  <option key={opt} value={opt}>
-                    {opt}
-                  </option>
-                ))}
-              </select>
+          <div className="flex flex-col sm:flex-row gap-3 min-w-0">
+            <select
+              value={docLabel}
+              onChange={(e) => setDocLabel(e.target.value)}
+              className="w-full sm:flex-1 min-w-0 border border-neutral-300 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm bg-white focus:outline-none focus:ring-2 focus:ring-neutral-950"
+            >
+              {REQUIRED_DOC_OPTIONS.map((opt) => (
+                <option key={opt} value={opt}>
+                  {opt}
+                </option>
+              ))}
+            </select>
 
-              <label className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold bg-neutral-950 text-white hover:bg-neutral-800 cursor-pointer whitespace-nowrap shrink-0">
-                <Upload className="w-4 h-4" aria-hidden="true" />
-                <span>Choose File</span>
-                <input
-                  type="file"
-                  accept=".pdf,.jpg,.jpeg,.png"
-                  onChange={handleFileInputChange}
-                  className="sr-only"
+            <label className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl text-xs sm:text-sm font-semibold bg-neutral-950 text-white hover:bg-neutral-800 cursor-pointer whitespace-nowrap shrink-0">
+              <Upload className="w-4 h-4" aria-hidden="true" />
+              <span>Choose Document</span>
+              <input
+                type="file"
+                accept=".pdf,.jpg,.jpeg,.png"
+                onChange={handleFileInputChange}
+                className="sr-only"
+              />
+            </label>
+          </div>
+
+          {uploadProgress !== null && (
+            <div className="space-y-1.5">
+              <div className="flex justify-between text-xs font-mono tabular-nums text-neutral-700">
+                <span>Uploading document...</span>
+                <span>{uploadProgress}%</span>
+              </div>
+              <div className="w-full h-2 bg-neutral-200 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-[#FFC20E] transition-all duration-150"
+                  style={{ width: `${uploadProgress}%` }}
                 />
-              </label>
+              </div>
             </div>
+          )}
 
-            <div className="flex flex-wrap items-center gap-2 pt-1">
-              <span className="text-xs text-neutral-500">Quick test:</span>
-              <button
-                type="button"
-                onClick={() =>
-                  runSimulatedSignedUpload({
-                    name: `${docLabel.toLowerCase().replace(/\s+/g, '_')}.pdf`,
-                    type: 'application/pdf',
-                    size: 1450000,
-                  })
-                }
-                className="text-xs px-2.5 py-1 rounded-lg border border-neutral-300 bg-white hover:bg-neutral-50 text-neutral-900 font-medium"
-              >
-                Valid PDF (1.4 MB)
-              </button>
-              <button
-                type="button"
-                onClick={() =>
-                  runSimulatedSignedUpload({
-                    name: 'archive.exe',
-                    type: 'application/x-msdownload',
-                    size: 42000,
-                  })
-                }
-                className="text-xs px-2.5 py-1 rounded-lg border border-neutral-300 bg-white hover:bg-neutral-50 text-neutral-900 font-medium"
-              >
-                Reject Wrong Type
-              </button>
-              <button
-                type="button"
-                onClick={() =>
-                  runSimulatedSignedUpload({
-                    name: 'high_res_scan.png',
-                    type: 'image/png',
-                    size: 6.4 * 1024 * 1024,
-                  })
-                }
-                className="text-xs px-2.5 py-1 rounded-lg border border-neutral-300 bg-white hover:bg-neutral-50 text-neutral-900 font-medium"
-              >
-                Reject &gt; 5 MB
-              </button>
+          {uploadError && (
+            <div
+              role="alert"
+              className="flex items-start gap-2 p-3.5 rounded-xl border border-red-200 bg-red-50 text-red-900 text-xs"
+            >
+              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" aria-hidden="true" />
+              <span>{uploadError}</span>
             </div>
+          )}
 
-            {uploadProgress !== null && (
-              <div className="space-y-1.5">
-                <div className="flex justify-between text-xs font-mono tabular-nums text-neutral-700">
-                  <span>Uploading via signed URL...</span>
-                  <span>{uploadProgress}%</span>
-                </div>
-                <div className="w-full h-2 bg-neutral-200 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-[#FFC20E] transition-all duration-150"
-                    style={{ width: `${uploadProgress}%` }}
-                  />
-                </div>
-              </div>
-            )}
+          <div className="pt-2">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-neutral-400 mb-3">
+              Uploaded Document Files
+            </h3>
 
-            {uploadError && (
-              <div
-                role="alert"
-                className="flex items-start gap-2 p-3 rounded-lg border border-red-200 bg-red-50 text-red-900 text-xs"
-              >
-                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" aria-hidden="true" />
-                <span>{uploadError}</span>
-              </div>
-            )}
-
-            {uploadSuccess && (
-              <div
-                role="status"
-                className="flex items-start gap-2 p-3 rounded-lg border border-neutral-950 bg-neutral-50 text-neutral-950 text-xs"
-              >
-                <Check className="w-4 h-4 shrink-0 mt-0.5" aria-hidden="true" />
-                <span>{uploadSuccess}</span>
-              </div>
-            )}
-
-            <ul className="divide-y divide-neutral-200">
-              {activePerson.documents.length === 0 ? (
-                <li className="py-3 text-xs text-neutral-500">
-                  No documents uploaded yet.
-                </li>
-              ) : (
-                activePerson.documents.map((doc) => (
+            {activePerson.documents.length === 0 ? (
+              <p className="text-xs text-neutral-500 italic py-2">
+                No documents uploaded yet.
+              </p>
+            ) : (
+              <ul className="divide-y divide-neutral-100 border border-neutral-200 rounded-xl overflow-hidden">
+                {activePerson.documents.map((doc) => (
                   <li
                     key={doc.docId}
-                    className="py-2.5 flex items-center justify-between gap-3"
+                    className="p-3.5 flex items-center justify-between gap-3 hover:bg-neutral-50 transition-colors"
                   >
-                    <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="flex items-center gap-3 min-w-0">
                       <FileText
                         className="w-4 h-4 text-neutral-700 shrink-0"
                         aria-hidden="true"
@@ -891,64 +750,67 @@ export const ApplicantScreen: React.FC<ApplicantScreenProps> = ({
                         </p>
                       </div>
                     </div>
-                    <span className="bg-neutral-950 text-white rounded-full px-2.5 py-0.5 text-[11px] font-semibold shrink-0">
-                      Signed
+                    <span className="bg-neutral-100 text-neutral-800 rounded-full px-2.5 py-0.5 text-[11px] font-semibold shrink-0">
+                      Uploaded
                     </span>
                   </li>
-                ))
-              )}
-            </ul>
-          </section>
+                ))}
+              </ul>
+            )}
+          </div>
+        </section>
+      )}
 
-          {/* Status History Timeline */}
-          <section className="bg-white border border-neutral-200 rounded-2xl p-6 space-y-4 shadow-xs">
-            <div className="border-b border-neutral-200 pb-3">
-              <p className="section-kicker">AUDIT TRAIL</p>
-              <h2 className="font-display text-lg font-bold text-neutral-950 mt-0.5">
-                Status History Timeline
-              </h2>
-              <p className="text-xs text-neutral-600">
-                Append-only audit trail ordered by event timestamp
-              </p>
-            </div>
+      {/* 4. STATUS HISTORY VIEW */}
+      {activeTab === 'history' && (
+        <section className="bg-white border border-neutral-200 rounded-2xl p-6 sm:p-8 space-y-4 shadow-xs max-w-3xl">
+          <div className="border-b border-neutral-200 pb-3">
+            <h2 className="font-display text-lg font-bold text-neutral-950">
+              Audit Timeline
+            </h2>
+            <p className="text-xs text-neutral-600">
+              Complete chronological history of stage advances and verification actions.
+            </p>
+          </div>
 
-            <ol className="space-y-3">
-              {activePerson.statusHistory.length === 0 ? (
-                <li className="text-xs text-neutral-500">
-                  Save draft or submit application to initialize audit trail.
+          <ol className="space-y-3">
+            {activePerson.statusHistory.length === 0 ? (
+              <li className="text-xs text-neutral-500 italic py-2">
+                No history entries recorded yet.
+              </li>
+            ) : (
+              activePerson.statusHistory.map((item) => (
+                <li
+                  key={item.eventId}
+                  className="p-3.5 bg-neutral-50 border border-neutral-200 rounded-xl space-y-1.5"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-bold text-neutral-950">
+                      {item.label}
+                    </span>
+                    <span className="text-[11px] font-mono tabular-nums text-neutral-500 shrink-0">
+                      seq #{item.seq}
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 text-[11px] text-neutral-600">
+                    <Clock className="w-3 h-3 shrink-0" aria-hidden="true" />
+                    <span className="font-mono tabular-nums">
+                      {format(new Date(item.occurredAt), 'dd MMM yyyy, HH:mm')}
+                    </span>
+                    <span aria-hidden="true">·</span>
+                    <span>Actor: {item.actor}</span>
+                  </div>
+                  {item.note && (
+                    <p className="text-xs text-neutral-700 bg-white p-2 rounded-lg border border-neutral-200 mt-1">
+                      {item.note}
+                    </p>
+                  )}
                 </li>
-              ) : (
-                activePerson.statusHistory.map((item) => (
-                  <li
-                    key={item.eventId}
-                    className="pb-3 border-b border-neutral-100 last:border-b-0 last:pb-0 space-y-1"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-xs font-semibold text-neutral-950">
-                        {item.label}
-                      </span>
-                      <span className="text-[11px] font-mono tabular-nums text-neutral-500 shrink-0">
-                        seq #{item.seq}
-                      </span>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2 text-[11px] text-neutral-600">
-                      <Clock className="w-3 h-3 shrink-0" aria-hidden="true" />
-                      <span className="font-mono tabular-nums">
-                        {format(new Date(item.occurredAt), 'dd MMM yyyy, HH:mm')}
-                      </span>
-                      <span aria-hidden="true">·</span>
-                      <span>{item.actor}</span>
-                    </div>
-                    {item.note && (
-                      <p className="text-xs text-neutral-600">{item.note}</p>
-                    )}
-                  </li>
-                ))
-              )}
-            </ol>
-          </section>
-        </div>
-      </div>
+              ))
+            )}
+          </ol>
+        </section>
+      )}
     </div>
   );
 };
