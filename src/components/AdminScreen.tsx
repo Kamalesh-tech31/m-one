@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { format } from 'date-fns';
 import {
-  Award,
   BarChart3,
   CheckCircle2,
   ClipboardCheck,
@@ -140,67 +139,24 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
     });
   }, [allPersons, cycleFilter, applicantSearch]);
 
-  const adminVerificationQueue = useMemo(() => {
-    return scoped.volunteeringWorks
-      .filter(
-        (w) =>
-          (w.submitterRole === 'student' && w.status === 'Anchor approved') ||
-          (w.submitterRole === 'anchor' && w.status === 'Submitted')
-      )
-      .sort((a, b) => Date.parse(b.submittedAt) - Date.parse(a.submittedAt));
+  const [volunteeringStatusFilter, setVolunteeringStatusFilter] = useState<
+    'all' | 'submitted' | 'approved' | 'verified'
+  >('all');
+
+  const allVolunteeringSubmissions = useMemo(() => {
+    return [...scoped.volunteeringWorks].sort(
+      (a, b) => Date.parse(b.submittedAt) - Date.parse(a.submittedAt)
+    );
   }, [scoped.volunteeringWorks]);
 
-  const leaderboard = useMemo(() => {
-    const anchors = allPersons
-      .filter((p) => p.roles.includes('anchor') || p.status === 'anchor')
-      .map((a) => {
-        const verifiedTotal =
-          a.volunteeringCounts.teleVerifications +
-          a.volunteeringCounts.physicalVerifications +
-          a.volunteeringCounts.schoolVisits;
-        const mentees = allPersons.filter((s) => s.anchorId === a.personId);
-        const totalCgpaGrowth = mentees.reduce((sum, student) => {
-          if (student.cgpaHistory.length < 2) return sum;
-          const first = student.cgpaHistory[0].gpa;
-          const last = student.cgpaHistory[student.cgpaHistory.length - 1].gpa;
-          return sum + Math.max(0, last - first);
-        }, 0);
-        const score = Math.round(verifiedTotal * 10 + totalCgpaGrowth * 20);
-        return {
-          personId: a.personId,
-          name: a.name,
-          region: a.region,
-          verifiedTotal,
-          menteeCount: mentees.length,
-          totalCgpaGrowth,
-          score,
-        };
-      })
-      .sort((a, b) => b.score - a.score);
-
-    const topTele = [...allPersons]
-      .sort(
-        (a, b) =>
-          b.volunteeringCounts.teleVerifications -
-          a.volunteeringCounts.teleVerifications
-      )
-      .slice(0, 5);
-
-    const topPhysical = [...allPersons]
-      .sort(
-        (a, b) =>
-          b.volunteeringCounts.physicalVerifications -
-          a.volunteeringCounts.physicalVerifications
-      )
-      .slice(0, 5);
-
-    return {
-      bestAnchor: anchors[0],
-      anchors,
-      topTele,
-      topPhysical,
-    };
-  }, [allPersons]);
+  const filteredVolunteeringSubmissions = useMemo(() => {
+    return allVolunteeringSubmissions.filter((w) => {
+      if (volunteeringStatusFilter === 'submitted') return w.status === 'Submitted';
+      if (volunteeringStatusFilter === 'approved') return w.status === 'Anchor approved';
+      if (volunteeringStatusFilter === 'verified') return w.status === 'Admin verified';
+      return true;
+    });
+  }, [allVolunteeringSubmissions, volunteeringStatusFilter]);
 
   const yoyData = useMemo(() => {
     return (['2024', '2025', '2026'] as const).map((cid) => {
@@ -924,30 +880,76 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
         </div>
       )}
 
-      {/* 3. VOLUNTEERING VERIFICATION TAB */}
-      {activeTab === 'verification' && (
+      {/* 3. VOLUNTEERING SUBMISSIONS & APPROVAL WORKFLOW TAB */}
+      {(activeTab === 'verification' || activeTab === 'volunteering') && (
         <div className="space-y-6">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-neutral-200 pb-5">
             <div>
               <h1 className="font-display text-2xl sm:text-3xl font-extrabold text-neutral-950 tracking-[-0.02em]">
-                Volunteering Verification
+                Volunteering Approvals & Verification
               </h1>
               <p className="text-sm text-neutral-600 mt-1">
-                Inspect field photo proof, read-only location, and timestamp before syncing counts.
+                Review student volunteering submissions, track verification status, and execute approval workflows.
               </p>
             </div>
-            <div className="text-xs font-semibold tabular-nums text-neutral-600">
-              {adminVerificationQueue.length} pending verification(s)
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-semibold px-3 py-1.5 rounded-xl bg-amber-50 text-amber-900 border border-amber-200">
+                {allVolunteeringSubmissions.filter((w) => w.status === 'Submitted').length} pending approval
+              </span>
+              <span className="text-xs font-semibold px-3 py-1.5 rounded-xl bg-blue-50 text-blue-900 border border-blue-200">
+                {allVolunteeringSubmissions.filter((w) => w.status === 'Anchor approved').length} approved
+              </span>
+              <span className="text-xs font-semibold px-3 py-1.5 rounded-xl bg-emerald-50 text-emerald-900 border border-emerald-200">
+                {allVolunteeringSubmissions.filter((w) => w.status === 'Admin verified').length} verified
+              </span>
             </div>
           </div>
 
-          {adminVerificationQueue.length === 0 ? (
+          {/* Filter Pills */}
+          <div className="flex flex-wrap items-center gap-2">
+            {[
+              { id: 'all', label: `All Submissions (${allVolunteeringSubmissions.length})` },
+              {
+                id: 'submitted',
+                label: `Pending Approval (${
+                  allVolunteeringSubmissions.filter((w) => w.status === 'Submitted').length
+                })`,
+              },
+              {
+                id: 'approved',
+                label: `Approved (${
+                  allVolunteeringSubmissions.filter((w) => w.status === 'Anchor approved').length
+                })`,
+              },
+              {
+                id: 'verified',
+                label: `Verified & Synced (${
+                  allVolunteeringSubmissions.filter((w) => w.status === 'Admin verified').length
+                })`,
+              },
+            ].map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setVolunteeringStatusFilter(tab.id as any)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors ${
+                  volunteeringStatusFilter === tab.id
+                    ? 'bg-neutral-950 text-white'
+                    : 'bg-white border border-neutral-200 text-neutral-700 hover:bg-neutral-50'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          {filteredVolunteeringSubmissions.length === 0 ? (
             <div className="bg-white border border-neutral-200 rounded-2xl p-10 text-center text-sm text-neutral-500">
-              All volunteering submissions have been verified.
+              No volunteering submissions found for this filter.
             </div>
           ) : (
             <div className="grid grid-cols-1 gap-4">
-              {adminVerificationQueue.map((work) => (
+              {filteredVolunteeringSubmissions.map((work) => (
                 <div
                   key={work.workId}
                   className="bg-white border border-neutral-200 rounded-2xl overflow-hidden grid grid-cols-1 sm:grid-cols-12 shadow-xs"
@@ -963,11 +965,26 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
                   <div className="sm:col-span-8 p-5 flex flex-col justify-between gap-4">
                     <div className="space-y-2">
                       <div className="flex items-center justify-between gap-2">
-                        <span className="bg-neutral-950 text-white rounded-full px-2.5 py-0.5 text-[11px] font-semibold">
-                          {work.submitterRole === 'anchor'
-                            ? 'Anchor Direct'
-                            : 'Anchor Approved'}
-                        </span>
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={`rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${
+                              work.status === 'Admin verified'
+                                ? 'bg-emerald-100 text-emerald-800'
+                                : work.status === 'Anchor approved'
+                                ? 'bg-blue-100 text-blue-800'
+                                : 'bg-amber-100 text-amber-800'
+                            }`}
+                          >
+                            {work.status === 'Submitted'
+                              ? 'Pending Approval'
+                              : work.status === 'Anchor approved'
+                              ? 'Approved'
+                              : 'Admin Verified'}
+                          </span>
+                          <span className="bg-neutral-100 text-neutral-700 rounded-full px-2.5 py-0.5 text-[11px] font-semibold capitalize">
+                            {work.submitterRole === 'anchor' ? 'Anchor Direct' : 'Student Submission'}
+                          </span>
+                        </div>
                         <span className="font-mono text-[11px] text-neutral-500">
                           {work.workId}
                         </span>
@@ -978,42 +995,109 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
                       <div className="flex flex-wrap items-center gap-3 text-xs text-neutral-600">
                         <span className="inline-flex items-center gap-1">
                           <MapPin className="w-3.5 h-3.5" aria-hidden="true" />
-                          {work.location}
+                          {work.location} ({work.region})
                         </span>
                         <span className="inline-flex items-center gap-1 font-mono tabular-nums">
                           <Clock className="w-3.5 h-3.5" aria-hidden="true" />
-                          {format(new Date(work.submittedAt), 'dd MMM yyyy, HH:mm')}
+                          Submitted {format(new Date(work.submittedAt), 'dd MMM yyyy, HH:mm')}
                         </span>
                       </div>
-                      <p className="text-xs text-neutral-700">{work.notes}</p>
+                      {work.notes && <p className="text-xs text-neutral-700">{work.notes}</p>}
                     </div>
 
-                    <div className="flex items-center justify-between pt-2 border-t border-neutral-100">
-                      <span className="text-[11px] text-neutral-500 font-medium">
-                        Synced from Volunteer Portal upon verification
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          onAppend({
-                            type: 'VOLUNTEERING_WORK_VERIFIED',
-                            personId: work.personId,
-                            cycleId: work.cycleId,
-                            actor: actorName,
-                            payload: {
-                              workId: work.workId,
-                              verifiedBy: actorName,
-                            },
-                          });
-                          setToastMsg(
-                            `Verified ${work.workId} for ${work.personName}. Counts synced.`
-                          );
-                        }}
-                        className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-[#FFC20E] text-neutral-950 hover:bg-[#e5ae0b]"
-                      >
-                        <CheckCircle2 className="w-3.5 h-3.5" aria-hidden="true" />
-                        <span>Verify & Sync Counts</span>
-                      </button>
+                    <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-neutral-100">
+                      <div>
+                        {work.status === 'Submitted' && (
+                          <span className="text-[11px] text-neutral-500 font-medium">
+                            Awaiting admin review and approval
+                          </span>
+                        )}
+                        {work.status === 'Anchor approved' && (
+                          <span className="text-[11px] text-neutral-600 font-medium">
+                            Approved by {work.anchorApprovedBy || 'Admin'} · Ready for final verification
+                          </span>
+                        )}
+                        {work.status === 'Admin verified' && (
+                          <span className="text-[11px] text-emerald-700 font-medium inline-flex items-center gap-1">
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" aria-hidden="true" />
+                            Verified by {work.verifiedBy || 'Admin'} · Counts synced to Volunteer Portal
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        {work.status === 'Submitted' && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                onAppend({
+                                  type: 'VOLUNTEERING_WORK_ANCHOR_APPROVED',
+                                  personId: work.personId,
+                                  cycleId: work.cycleId || '2026',
+                                  actor: actorName,
+                                  payload: {
+                                    workId: work.workId,
+                                    scholarPersonId: work.personId,
+                                  },
+                                });
+                                setToastMsg(
+                                  `Approved volunteering submission ${work.workId} for ${work.personName}.`
+                                );
+                              }}
+                              className="px-3.5 py-2 rounded-xl text-xs font-semibold bg-white border border-neutral-300 text-neutral-900 hover:bg-neutral-50"
+                            >
+                              Approve
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                onAppend({
+                                  type: 'VOLUNTEERING_WORK_VERIFIED',
+                                  personId: work.personId,
+                                  cycleId: work.cycleId || '2026',
+                                  actor: actorName,
+                                  payload: {
+                                    workId: work.workId,
+                                    verifiedBy: actorName,
+                                  },
+                                });
+                                setToastMsg(
+                                  `Approved & verified ${work.workId} for ${work.personName}. Counts synced.`
+                                );
+                              }}
+                              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-[#FFC20E] text-neutral-950 hover:bg-[#e5ae0b]"
+                            >
+                              <CheckCircle2 className="w-3.5 h-3.5" aria-hidden="true" />
+                              <span>Verify & Sync</span>
+                            </button>
+                          </>
+                        )}
+                        {work.status === 'Anchor approved' && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              onAppend({
+                                type: 'VOLUNTEERING_WORK_VERIFIED',
+                                personId: work.personId,
+                                cycleId: work.cycleId || '2026',
+                                actor: actorName,
+                                payload: {
+                                  workId: work.workId,
+                                  verifiedBy: actorName,
+                                },
+                              });
+                              setToastMsg(
+                                `Verified ${work.workId} for ${work.personName}. Counts synced.`
+                              );
+                            }}
+                            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-[#FFC20E] text-neutral-950 hover:bg-[#e5ae0b]"
+                          >
+                            <CheckCircle2 className="w-3.5 h-3.5" aria-hidden="true" />
+                            <span>Verify & Sync Counts</span>
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -1023,137 +1107,7 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
         </div>
       )}
 
-      {/* 4. AWARDS TAB (Leaderboard Table, no charts) */}
-      {activeTab === 'awards' && (
-        <div className="space-y-6">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-neutral-200 pb-5">
-            <div>
-              <h1 className="font-display text-2xl sm:text-3xl font-extrabold text-neutral-950 tracking-[-0.02em]">
-                Awards
-              </h1>
-              <p className="text-sm text-neutral-600 mt-1">
-                Yearly awards and recognition based on verified work and scholar CGPA growth.
-              </p>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-            <section className="lg:col-span-7 bg-white border border-neutral-200 rounded-2xl p-6 space-y-4 shadow-xs">
-              <div className="flex items-center gap-2 border-b border-neutral-200 pb-3">
-                <Award className="w-5 h-5 text-neutral-950" aria-hidden="true" />
-                <div>
-                  <h2 className="font-display text-base font-bold text-neutral-950">
-                    Anchor Leadership Rankings
-                  </h2>
-                  <p className="text-xs text-neutral-600">
-                    Ranked by verified volunteering points + scholar CGPA growth.
-                  </p>
-                </div>
-              </div>
-
-              {leaderboard.bestAnchor && (
-                <div className="border border-neutral-950 bg-neutral-950 text-white rounded-xl p-4 space-y-1">
-                  <p className="text-[11px] font-mono uppercase tracking-wider text-[#FFC20E] font-semibold">
-                    Best Anchor Award
-                  </p>
-                  <p className="text-base font-bold">
-                    {leaderboard.bestAnchor.name}
-                  </p>
-                  <p className="text-xs font-mono tabular-nums text-neutral-300 pt-1">
-                    Score {leaderboard.bestAnchor.score} ·{' '}
-                    {leaderboard.bestAnchor.verifiedTotal} verified works · +
-                    {(leaderboard.bestAnchor.totalCgpaGrowth || 0).toFixed(2)} CGPA growth across{' '}
-                    {leaderboard.bestAnchor.menteeCount} scholars
-                  </p>
-                </div>
-              )}
-
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs">
-                  <thead>
-                    <tr className="border-b border-neutral-200 text-neutral-500 font-semibold">
-                      <th className="py-2 pr-3">Rank</th>
-                      <th className="py-2 pr-3">Anchor</th>
-                      <th className="py-2 pr-3">Region</th>
-                      <th className="py-2 pr-3">Verified Works</th>
-                      <th className="py-2 pr-3">Scholars</th>
-                      <th className="py-2 font-semibold text-right">Score</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-neutral-100">
-                    {leaderboard.anchors.map((a, idx) => (
-                      <tr key={a.personId} className="hover:bg-neutral-50">
-                        <td className="py-2.5 pr-3 font-mono font-bold text-neutral-950">
-                          #{idx + 1}
-                        </td>
-                        <td className="py-2.5 pr-3 font-semibold text-neutral-950">
-                          {a.name}
-                        </td>
-                        <td className="py-2.5 pr-3 text-neutral-600">{a.region}</td>
-                        <td className="py-2.5 pr-3 font-mono tabular-nums text-neutral-800">
-                          {a.verifiedTotal}
-                        </td>
-                        <td className="py-2.5 pr-3 font-mono tabular-nums text-neutral-800">
-                          {a.menteeCount}
-                        </td>
-                        <td className="py-2.5 text-right font-mono font-bold tabular-nums text-neutral-950">
-                          {a.score}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </section>
-
-            <div className="lg:col-span-5 space-y-6">
-              <section className="bg-white border border-neutral-200 rounded-2xl p-6 space-y-3 shadow-xs">
-                <h3 className="text-sm font-bold text-neutral-950">
-                  Most Verified Tele-Verifications
-                </h3>
-                <ul className="divide-y divide-neutral-100 text-xs">
-                  {leaderboard.topTele.map((p, idx) => (
-                    <li
-                      key={p.personId}
-                      className="py-2 flex items-center justify-between"
-                    >
-                      <span className="text-neutral-800">
-                        {idx + 1}. {p.name}
-                      </span>
-                      <span className="font-mono font-bold tabular-nums text-neutral-950">
-                        {p.volunteeringCounts.teleVerifications}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              </section>
-
-              <section className="bg-white border border-neutral-200 rounded-2xl p-6 space-y-3 shadow-xs">
-                <h3 className="text-sm font-bold text-neutral-950">
-                  Most Verified Physical Verifications
-                </h3>
-                <ul className="divide-y divide-neutral-100 text-xs">
-                  {leaderboard.topPhysical.map((p, idx) => (
-                    <li
-                      key={p.personId}
-                      className="py-2 flex items-center justify-between"
-                    >
-                      <span className="text-neutral-800">
-                        {idx + 1}. {p.name}
-                      </span>
-                      <span className="font-mono font-bold tabular-nums text-neutral-950">
-                        {p.volunteeringCounts.physicalVerifications}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              </section>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* 5. SAMPLED REQUESTS TAB */}
+      {/* 4. SAMPLED REQUESTS TAB */}
       {activeTab === 'sampled' && (
         <div className="space-y-6">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-neutral-200 pb-5">
@@ -1167,8 +1121,8 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
             </div>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-            <section className="lg:col-span-7 bg-white border border-neutral-200 rounded-2xl p-6 space-y-4 shadow-xs">
+          <div className="max-w-4xl space-y-6">
+            <section className="bg-white border border-neutral-200 rounded-2xl p-6 space-y-4 shadow-xs">
               <div className="border-b border-neutral-200 pb-3">
                 <h2 className="font-display text-base font-bold text-neutral-950">
                   Create Sampled Request (1 per 25)
@@ -1259,63 +1213,41 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
               </form>
             </section>
 
-            <section className="lg:col-span-5 bg-white border border-neutral-200 rounded-2xl p-6 space-y-3 shadow-xs">
-              <div className="flex items-center gap-2 border-b border-neutral-200 pb-3">
-                <ShieldAlert className="w-5 h-5 text-neutral-950" aria-hidden="true" />
-                <div>
+            {scoped.sampledRequests.length > 0 && (
+              <section className="bg-white border border-neutral-200 rounded-2xl p-6 space-y-3 shadow-xs">
+                <div className="border-b border-neutral-200 pb-3">
                   <h2 className="font-display text-base font-bold text-neutral-950">
-                    Escalations & Flags
+                    Dispatched Sampled Requests ({scoped.sampledRequests.length})
                   </h2>
-                  <p className="text-xs text-neutral-600">
-                    Active student difficulty flags and anchor escalations.
+                  <p className="text-xs text-neutral-600 mt-0.5">
+                    Cohort audit requests dispatched across anchors and scholars.
                   </p>
                 </div>
-              </div>
-
-              <div className="space-y-2.5">
-                {scoped.adminFlags.length === 0 && (
-                  <p className="text-xs text-neutral-500 py-3">No active anchor escalations.</p>
-                )}
-                {scoped.adminFlags.map((flg) => (
-                  <div
-                    key={flg.flagId}
-                    className="border border-neutral-200 rounded-xl p-3 text-xs space-y-1"
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="font-bold text-neutral-950">
-                        {flg.subjectName}
-                      </span>
-                      <span className="bg-neutral-950 text-white rounded-full px-2.5 py-0.5 text-[11px] font-semibold capitalize">
-                        {flg.flagType}
-                      </span>
-                    </div>
-                    <p className="text-neutral-700">{flg.details}</p>
-                    <p className="text-[11px] text-neutral-500">
-                      Raised by {flg.raisedBy}
-                    </p>
-                  </div>
-                ))}
-
-                {allPersons
-                  .filter((p) => p.difficultyFlag?.flagged)
-                  .map((p) => (
+                <div className="space-y-3">
+                  {scoped.sampledRequests.map((sr) => (
                     <div
-                      key={`diff-${p.personId}`}
-                      className="border border-neutral-200 rounded-xl p-3 text-xs space-y-1"
+                      key={sr.requestId}
+                      className="border border-neutral-200 rounded-xl p-4 text-xs space-y-2"
                     >
-                      <div className="flex items-center justify-between">
-                        <span className="font-bold text-neutral-950">
-                          {p.name} ({p.difficultyFlag?.category})
-                        </span>
-                        <span className="font-mono text-[11px] text-neutral-600">
-                          {p.personId}
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <div>
+                          <p className="font-bold text-neutral-950 text-sm">{sr.title}</p>
+                          <p className="text-neutral-600 mt-0.5">{sr.prompt}</p>
+                        </div>
+                        <span className="bg-neutral-950 text-white rounded-full px-2.5 py-0.5 text-[11px] font-semibold shrink-0 self-start sm:self-center">
+                          {sr.ratioLabel}
                         </span>
                       </div>
-                      <p className="text-neutral-800">{p.difficultyFlag?.note}</p>
+                      <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-neutral-100 text-[11px] text-neutral-500">
+                        <span>Deadline: {sr.deadline}</span>
+                        <span>Sampled: {sr.sampledPersonIds.length} scholar(s)</span>
+                        <span>Responses: {Object.keys(sr.responses || {}).length}</span>
+                      </div>
                     </div>
                   ))}
-              </div>
-            </section>
+                </div>
+              </section>
+            )}
           </div>
         </div>
       )}

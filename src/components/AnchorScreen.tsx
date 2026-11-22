@@ -10,7 +10,6 @@ import {
   KeyRound,
   Megaphone,
   Plus,
-  Receipt,
   ShieldCheck,
   Users,
   X,
@@ -22,7 +21,6 @@ import { formatBytes } from '../core/validation';
 import {
   DISTRICTS_8,
   type PersonProfile,
-  type VolunteeringCategory,
 } from '../core/types';
 
 export type AnchorTab =
@@ -30,9 +28,7 @@ export type AnchorTab =
   | 'announcements'
   | 'meetings'
   | 'resources'
-  | 'approvals'
-  | 'requests'
-  | 'fee';
+  | 'requests';
 
 interface AnchorScreenProps {
   scoped: AnchorScopedView;
@@ -85,23 +81,6 @@ export const AnchorScreen: React.FC<AnchorScreenProps> = ({
   );
   const [checkBlocked, setCheckBlocked] = useState(false);
   const [checkResponse, setCheckResponse] = useState('');
-
-  // Flag to admin form
-  const [flagSubjectId, setFlagSubjectId] = useState<string>(
-    roster[0]?.personId || ''
-  );
-  const [flagType, setFlagType] = useState<'malpractice' | 'achievement'>(
-    'achievement'
-  );
-  const [flagDetails, setFlagDetails] = useState('');
-
-  // Anchor willingness / renewal fee
-  const [willingRegion, setWillingRegion] = useState(
-    activeAnchor?.region || 'Chennai'
-  );
-  const [willingMotivation, setWillingMotivation] = useState(
-    'Re-committing to another cycle of mentoring and cohort scholarship stewardship.'
-  );
 
   // Sampled response draft
   const [sampledDrafts, setSampledDrafts] = useState<Record<string, string>>({});
@@ -255,20 +234,6 @@ export const AnchorScreen: React.FC<AnchorScreenProps> = ({
     showToast(`Leave request ${decision.toLowerCase()}.`);
   };
 
-  const handleApproveWork = (workId: string, scholarPersonId: string) => {
-    onAppend({
-      type: 'VOLUNTEERING_WORK_ANCHOR_APPROVED',
-      personId: activeAnchor.personId,
-      cycleId: '2026',
-      actor: actorName,
-      payload: {
-        workId,
-        scholarPersonId,
-      },
-    });
-    showToast('Volunteering work approved and forwarded to Admin.');
-  };
-
   const handleAssignVolunteerRequest = (
     requestId: string,
     assignedStudentId: string
@@ -337,49 +302,6 @@ export const AnchorScreen: React.FC<AnchorScreenProps> = ({
     showToast(`Monthly check logged for ${student.name}.`);
   };
 
-  const handleRaiseAdminFlag = (e: React.FormEvent) => {
-    e.preventDefault();
-    const subject = roster.find((s) => s.personId === flagSubjectId);
-    if (!subject || !flagDetails.trim()) return;
-
-    onAppend({
-      type: 'ADMIN_FLAG_RAISED',
-      personId: activeAnchor.personId,
-      cycleId: '2026',
-      actor: actorName,
-      payload: {
-        flagId: `FLG-${Date.now().toString(36).toUpperCase()}`,
-        subjectPersonId: subject.personId,
-        subjectName: subject.name,
-        flagType,
-        details: flagDetails.trim(),
-      },
-    });
-
-    setFlagDetails('');
-    showToast(`Flag sent to Admin regarding ${subject.name}.`);
-  };
-
-  const handleSubmitAnchorWillingness = (e: React.FormEvent) => {
-    e.preventDefault();
-
-    onAppend({
-      type: 'ANCHOR_WILLINGNESS_APPLIED',
-      personId: activeAnchor.personId,
-      cycleId: '2026',
-      actor: actorName,
-      payload: {
-        applicationId: `ANC-${Date.now().toString(36).toUpperCase()}`,
-        motivation: willingMotivation.trim(),
-        preferredRegion: willingRegion,
-        feeAmount: scoped.anchorFeeAmount,
-        paymentReceiptId: `RCPT-2026-${Math.floor(1000 + Math.random() * 9000)}`,
-      },
-    });
-
-    showToast(`Yearly renewal fee (Rs ${scoped.anchorFeeAmount.toLocaleString()}) paid.`);
-  };
-
   return (
     <div className="space-y-8">
       {/* Page Header (No yellow offset block) */}
@@ -390,9 +312,7 @@ export const AnchorScreen: React.FC<AnchorScreenProps> = ({
             {activeTab === 'announcements' && 'Cohort Announcements'}
             {activeTab === 'meetings' && 'Meetings & Leave Reviews'}
             {activeTab === 'resources' && 'Learning & Career Resources'}
-            {activeTab === 'approvals' && 'Volunteering Approvals'}
             {activeTab === 'requests' && 'Requests Inbox'}
-            {activeTab === 'fee' && 'Anchor Renewal & Receipts'}
           </h1>
           <p className="text-xs sm:text-sm text-neutral-600 mt-1">
             {activeTab === 'roster' &&
@@ -403,12 +323,8 @@ export const AnchorScreen: React.FC<AnchorScreenProps> = ({
               'Manage group gatherings, take attendance, and review scholar leave applications.'}
             {activeTab === 'resources' &&
               'Share curated study material and engineering preparation guides.'}
-            {activeTab === 'approvals' &&
-              'Review and approve student volunteering field proof submissions.'}
             {activeTab === 'requests' &&
               'Manage student volunteering availability requests and assign tasks.'}
-            {activeTab === 'fee' &&
-              `Annual anchor sponsorship contribution: Rs ${scoped.anchorFeeAmount.toLocaleString()}.`}
           </p>
         </div>
       </div>
@@ -524,52 +440,6 @@ export const AnchorScreen: React.FC<AnchorScreenProps> = ({
                 </table>
               </div>
             )}
-          </section>
-
-          {/* One-Tap Flag to Admin */}
-          <section className="bg-white border border-neutral-200 rounded-2xl p-6 sm:p-8 space-y-4 shadow-xs max-w-2xl">
-            <h2 className="font-display text-lg font-bold text-neutral-950">
-              One-Tap Scholar Alert to Admin
-            </h2>
-            <form onSubmit={handleRaiseAdminFlag} className="space-y-3">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <select
-                  value={flagSubjectId || roster[0]?.personId || ''}
-                  onChange={(e) => setFlagSubjectId(e.target.value)}
-                  className="w-full border border-neutral-300 rounded-xl px-3 py-2 text-xs bg-white focus:outline-none focus:border-neutral-950"
-                >
-                  {roster.map((s) => (
-                    <option key={s.personId} value={s.personId}>
-                      {s.name} ({s.personId})
-                    </option>
-                  ))}
-                </select>
-                <select
-                  value={flagType}
-                  onChange={(e) =>
-                    setFlagType(e.target.value as 'malpractice' | 'achievement')
-                  }
-                  className="w-full border border-neutral-300 rounded-xl px-3 py-2 text-xs bg-white focus:outline-none focus:border-neutral-950"
-                >
-                  <option value="achievement">Achievement Recognition</option>
-                  <option value="malpractice">Attendance / Malpractice Flag</option>
-                </select>
-              </div>
-              <textarea
-                rows={2}
-                value={flagDetails}
-                onChange={(e) => setFlagDetails(e.target.value)}
-                placeholder="Describe details for Admin review..."
-                className="w-full border border-neutral-300 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-neutral-950"
-                required
-              />
-              <button
-                type="submit"
-                className="px-4 py-2 rounded-xl text-xs font-semibold bg-neutral-950 text-white hover:bg-neutral-800 transition-colors"
-              >
-                Send Alert
-              </button>
-            </form>
           </section>
         </div>
       )}
@@ -866,73 +736,7 @@ export const AnchorScreen: React.FC<AnchorScreenProps> = ({
         </div>
       )}
 
-      {/* 5. VOLUNTEERING APPROVALS VIEW */}
-      {activeTab === 'approvals' && (
-        <section className="bg-white border border-neutral-200 rounded-2xl p-6 sm:p-8 space-y-4 shadow-xs max-w-4xl">
-          <h2 className="font-display text-lg font-bold text-neutral-950">
-            Review Submitted Volunteering Work
-          </h2>
-          <p className="text-xs text-neutral-600">
-            Approve verified student field visits so Admin can issue final verification.
-          </p>
-
-          {scoped.rosterVolunteeringWorks.length === 0 ? (
-            <p className="text-xs text-neutral-500 italic py-2">
-              No volunteering submissions to review.
-            </p>
-          ) : (
-            <div className="space-y-3">
-              {scoped.rosterVolunteeringWorks.map((work) => (
-                <div
-                  key={work.workId}
-                  className="p-4 border border-neutral-200 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
-                >
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <span className="font-bold text-neutral-950">
-                        {work.personName}
-                      </span>
-                      <span className="px-2 py-0.5 rounded bg-neutral-100 text-neutral-800 text-[11px] font-semibold capitalize">
-                        {work.category.replace('_', ' ')}
-                      </span>
-                    </div>
-                    <p className="text-neutral-600">{work.location}</p>
-                    <p className="text-[11px] text-neutral-500 font-mono">
-                      Submitted: {format(new Date(work.submittedAt), 'dd MMM yyyy, HH:mm')}
-                    </p>
-                  </div>
-
-                  <div className="flex items-center gap-3">
-                    <span
-                      className={`px-2 py-0.5 rounded text-[11px] font-semibold ${
-                        work.status === 'Admin verified'
-                          ? 'bg-green-100 text-green-800'
-                          : work.status === 'Anchor approved'
-                            ? 'bg-blue-100 text-blue-800'
-                            : 'bg-yellow-100 text-yellow-800'
-                      }`}
-                    >
-                      {work.status}
-                    </span>
-
-                    {work.status === 'Submitted' && (
-                      <button
-                        type="button"
-                        onClick={() => handleApproveWork(work.workId, work.personId)}
-                        className="px-3.5 py-1.5 rounded-lg text-xs font-bold bg-[#FFC20E] text-neutral-950 hover:bg-[#e5ae0b]"
-                      >
-                        Approve
-                      </button>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
-      )}
-
-      {/* 6. REQUESTS INBOX VIEW */}
+      {/* 5. REQUESTS INBOX VIEW */}
       {activeTab === 'requests' && (
         <section className="bg-white border border-neutral-200 rounded-2xl p-6 sm:p-8 space-y-4 shadow-xs max-w-4xl">
           <h2 className="font-display text-lg font-bold text-neutral-950">
@@ -985,91 +789,6 @@ export const AnchorScreen: React.FC<AnchorScreenProps> = ({
                 )}
               </div>
             ))}
-          </div>
-        </section>
-      )}
-
-      {/* 7. ANCHOR FEE & RECEIPT VIEW */}
-      {activeTab === 'fee' && (
-        <section className="bg-white border border-neutral-200 rounded-2xl p-6 sm:p-8 space-y-6 shadow-xs max-w-3xl">
-          <div className="border-b border-neutral-100 pb-3">
-            <h2 className="font-display text-lg font-bold text-neutral-950">
-              Annual Anchor Sponsorship & Stewardship Fee
-            </h2>
-            <p className="text-xs text-neutral-500">
-              Contribute your annual anchor sponsorship renewal (Rs {scoped.anchorFeeAmount.toLocaleString()}) and generate instant verified receipt.
-            </p>
-          </div>
-
-          <form onSubmit={handleSubmitAnchorWillingness} className="space-y-4">
-            <div className="space-y-1">
-              <label className="block text-xs font-bold text-neutral-900">
-                Preferred District for Cohort Assignment
-              </label>
-              <select
-                value={willingRegion}
-                onChange={(e) => setWillingRegion(e.target.value)}
-                className="w-full border border-neutral-300 rounded-xl px-3 py-2 text-xs bg-white"
-              >
-                {DISTRICTS_8.map((d) => (
-                  <option key={d} value={d}>
-                    {d}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="space-y-1">
-              <label className="block text-xs font-bold text-neutral-900">
-                Stewardship Motivation / Notes
-              </label>
-              <textarea
-                rows={2}
-                value={willingMotivation}
-                onChange={(e) => setWillingMotivation(e.target.value)}
-                className="w-full border border-neutral-300 rounded-xl px-3 py-2 text-xs"
-              />
-            </div>
-
-            <button
-              type="submit"
-              className="px-5 py-2.5 rounded-xl font-bold text-xs sm:text-sm bg-[#FFC20E] text-neutral-950 hover:bg-[#e5ae0b] transition-colors"
-            >
-              Pay Rs {scoped.anchorFeeAmount.toLocaleString()} Yearly Renewal & Generate Receipt
-            </button>
-          </form>
-
-          {/* Receipts List */}
-          <div className="pt-4 border-t border-neutral-100 space-y-3">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-neutral-400">
-              My Verified Renewal Receipts
-            </h3>
-
-            {scoped.ownAnchorApplications.length === 0 ? (
-              <p className="text-xs text-neutral-500 italic py-2">
-                No renewal receipts recorded yet.
-              </p>
-            ) : (
-              scoped.ownAnchorApplications.map((app) => (
-                <div
-                  key={app.applicationId}
-                  className="p-4 border border-neutral-200 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
-                >
-                  <div>
-                    <p className="font-bold text-neutral-950">
-                      Receipt {app.paymentReceiptId}
-                    </p>
-                    <p className="text-neutral-600">
-                      Region: {app.preferredRegion} · Paid{' '}
-                      {format(new Date(app.paidAt), 'dd MMM yyyy')}
-                    </p>
-                  </div>
-                  <span className="font-mono font-bold text-xs text-neutral-950 bg-neutral-100 px-3 py-1 rounded-full">
-                    Rs {app.feeAmount.toLocaleString()}
-                  </span>
-                </div>
-              ))
-            )}
           </div>
         </section>
       )}

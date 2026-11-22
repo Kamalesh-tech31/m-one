@@ -498,18 +498,14 @@ describe('Maatram One Role Auth, Route Guard & Scoping', () => {
       'Announcements',
       'Meetings and leave',
       'Resources',
-      'Volunteering approvals',
       'Requests inbox',
-      'Anchor fee and receipt',
     ]);
     expect(anchorItems.map((i) => i.path)).toEqual([
       '/anchor/roster',
       '/anchor/announcements',
       '/anchor/meetings',
       '/anchor/resources',
-      '/anchor/approvals',
       '/anchor/requests',
-      '/anchor/fee',
     ]);
     // Verifies Alumni Directory is removed for Anchor
     expect(anchorItems.some((i) => i.label.toLowerCase().includes('alumni'))).toBe(false);
@@ -518,8 +514,7 @@ describe('Maatram One Role Auth, Route Guard & Scoping', () => {
     expect(adminItems.map((i) => i.label)).toEqual([
       'Applicants',
       'Cycles',
-      'Volunteering verification',
-      'Awards',
+      'Volunteering approvals',
       'Sampled requests',
       'Alumni career tracker',
       'Audit and Event Log',
@@ -529,7 +524,6 @@ describe('Maatram One Role Auth, Route Guard & Scoping', () => {
       '/admin/applicants',
       '/admin/cycles',
       '/admin/verification',
-      '/admin/awards',
       '/admin/sampled',
       '/admin/alumni',
       '/admin/events',

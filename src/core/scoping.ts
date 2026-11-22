@@ -95,16 +95,13 @@ export function getSidebarItemsForRole(role: UserRole): SidebarNavItem[] {
         { id: 'announcements', path: '/anchor/announcements', label: 'Announcements', group: 'Cohort' },
         { id: 'meetings', path: '/anchor/meetings', label: 'Meetings and leave', group: 'Cohort' },
         { id: 'resources', path: '/anchor/resources', label: 'Resources', group: 'Cohort' },
-        { id: 'approvals', path: '/anchor/approvals', label: 'Volunteering approvals', group: 'Volunteering' },
         { id: 'requests', path: '/anchor/requests', label: 'Requests inbox', group: 'Volunteering' },
-        { id: 'fee', path: '/anchor/fee', label: 'Anchor fee and receipt', group: 'Contribution' },
       ];
     case 'admin':
       return [
         { id: 'applicants', path: '/admin/applicants', label: 'Applicants', group: 'Admissions' },
         { id: 'cycles', path: '/admin/cycles', label: 'Cycles', group: 'Admissions' },
-        { id: 'verification', path: '/admin/verification', label: 'Volunteering verification', group: 'Volunteering' },
-        { id: 'awards', path: '/admin/awards', label: 'Awards', group: 'Operations' },
+        { id: 'verification', path: '/admin/verification', label: 'Volunteering approvals', group: 'Volunteering' },
         { id: 'sampled', path: '/admin/sampled', label: 'Sampled requests', group: 'Operations' },
         { id: 'alumni', path: '/admin/alumni', label: 'Alumni career tracker', group: 'People' },
         { id: 'events', path: '/admin/events', label: 'Audit and Event Log', group: 'System' },

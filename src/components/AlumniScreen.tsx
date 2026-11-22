@@ -1,9 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Building2, History, Search, Sparkles } from 'lucide-react';
-import {
-  normalizeCompanyName,
-  VISIBLE_NORMALIZATION_RULES,
-} from '../core/normalization';
+import { Building2, History, Search, X } from 'lucide-react';
+import { normalizeCompanyName } from '../core/normalization';
 import type { AppendEventInput } from '../core/store';
 import type { CareerSource, PersonProfile } from '../core/types';
 
@@ -22,17 +19,83 @@ export const AlumniScreen: React.FC<AlumniScreenProps> = ({
   onAppend,
   initialQuery,
 }) => {
-  const [companyQuery, setCompanyQuery] = useState(initialQuery || 'TCS');
+  const [companyQuery, setCompanyQuery] = useState(initialQuery || '');
   const [includePastHistory, setIncludePastHistory] = useState(true);
+  const [selectedCollege, setSelectedCollege] = useState('');
+  const [selectedCompany, setSelectedCompany] = useState('');
+  const [selectedRole, setSelectedRole] = useState('');
+  const [selectedLocation, setSelectedLocation] = useState('');
+
   const [selectedAlumnusId, setSelectedAlumnusId] = useState<string>(
     alumniList[0]?.personId || 'P-2020-01'
   );
 
   useEffect(() => {
-    if (initialQuery) {
+    if (initialQuery !== undefined) {
       setCompanyQuery(initialQuery);
     }
   }, [initialQuery]);
+
+  // Options derived dynamically from alumniList for LinkedIn-style filters
+  const collegeOptions = useMemo(() => {
+    const set = new Set<string>();
+    alumniList.forEach((a) => {
+      if (a.college?.trim()) set.add(a.college.trim());
+    });
+    return Array.from(set).sort();
+  }, [alumniList]);
+
+  const companyOptions = useMemo(() => {
+    const set = new Set<string>();
+    alumniList.forEach((a) => {
+      if (a.currentCompany?.trim()) {
+        const norm = normalizeCompanyName(a.currentCompany).normalized;
+        set.add(norm);
+      }
+      a.careerHistory.forEach((ch) => {
+        if (ch.company?.trim()) {
+          const norm = normalizeCompanyName(ch.company).normalized;
+          set.add(norm);
+        }
+      });
+    });
+    return Array.from(set).sort();
+  }, [alumniList]);
+
+  const roleOptions = useMemo(() => {
+    const set = new Set<string>();
+    alumniList.forEach((a) => {
+      if (a.currentRoleTitle?.trim()) set.add(a.currentRoleTitle.trim());
+      a.careerHistory.forEach((ch) => {
+        if (ch.roleTitle?.trim()) set.add(ch.roleTitle.trim());
+      });
+    });
+    return Array.from(set).sort();
+  }, [alumniList]);
+
+  const locationOptions = useMemo(() => {
+    const set = new Set<string>();
+    alumniList.forEach((a) => {
+      if (a.region?.trim()) set.add(a.region.trim());
+    });
+    return Array.from(set).sort();
+  }, [alumniList]);
+
+  const hasActiveFilters = Boolean(
+    companyQuery.trim() ||
+      selectedCollege ||
+      selectedCompany ||
+      selectedRole ||
+      selectedLocation
+  );
+
+  const handleClearFilters = () => {
+    setCompanyQuery('');
+    setSelectedCollege('');
+    setSelectedCompany('');
+    setSelectedRole('');
+    setSelectedLocation('');
+  };
 
   // Add career history event form (Admin only)
   const [newCompany, setNewCompany] = useState('');
@@ -55,36 +118,145 @@ export const AlumniScreen: React.FC<AlumniScreenProps> = ({
 
   const matchingAlumni = useMemo(() => {
     const targetKey = queryNorm.canonicalKey;
+    const selectedCompanyNorm = selectedCompany
+      ? normalizeCompanyName(selectedCompany).canonicalKey
+      : null;
+
     return alumniList
       .map((al) => {
+        // 1. College filter
+        if (selectedCollege && al.college !== selectedCollege) {
+          return null;
+        }
+
+        // 2. Location filter
+        if (selectedLocation && al.region !== selectedLocation) {
+          return null;
+        }
+
+        // 3. Current company & role normalization
         const currentNorm = al.currentCompany
           ? normalizeCompanyName(al.currentCompany)
           : null;
-        const matchedEntries = al.careerHistory.filter((entry) => {
-          const entryNorm = normalizeCompanyName(entry.company);
-          if (!targetKey) return true;
+
+        // 4. Job role check
+        const roleMatchesCurrent = Boolean(
+          !selectedRole ||
+            (al.currentRoleTitle &&
+              al.currentRoleTitle.toLowerCase().trim() ===
+                selectedRole.toLowerCase().trim())
+        );
+
+        const matchedRoleEntries = al.careerHistory.filter((entry) => {
+          if (!selectedRole) return true;
           return (
-            entryNorm.canonicalKey === targetKey ||
-            entryNorm.canonicalKey.includes(targetKey)
+            entry.roleTitle &&
+            entry.roleTitle.toLowerCase().trim() ===
+              selectedRole.toLowerCase().trim()
           );
         });
-        const currentMatches =
+
+        const passesRole = includePastHistory
+          ? roleMatchesCurrent || matchedRoleEntries.length > 0
+          : roleMatchesCurrent;
+
+        if (!passesRole) {
+          return null;
+        }
+
+        // 5. Company filter dropdown check
+        const companyMatchesCurrent = Boolean(
+          !selectedCompanyNorm ||
+            (currentNorm &&
+              (currentNorm.canonicalKey === selectedCompanyNorm ||
+                currentNorm.canonicalKey.includes(selectedCompanyNorm)))
+        );
+
+        const matchedCompanyEntries = al.careerHistory.filter((entry) => {
+          if (!selectedCompanyNorm) return true;
+          const entryNorm = normalizeCompanyName(entry.company);
+          return (
+            entryNorm.canonicalKey === selectedCompanyNorm ||
+            entryNorm.canonicalKey.includes(selectedCompanyNorm)
+          );
+        });
+
+        const passesCompanyFilter = includePastHistory
+          ? companyMatchesCurrent || matchedCompanyEntries.length > 0
+          : companyMatchesCurrent;
+
+        if (!passesCompanyFilter) {
+          return null;
+        }
+
+        // 6. Search by company name (companyQuery)
+        const matchedQueryEntries = al.careerHistory.filter((entry) => {
+          if (!targetKey) return true;
+          const entryNorm = normalizeCompanyName(entry.company);
+          return (
+            entryNorm.canonicalKey === targetKey ||
+            entryNorm.canonicalKey.includes(targetKey) ||
+            entry.company.toLowerCase().includes(companyQuery.toLowerCase().trim())
+          );
+        });
+
+        const currentQueryMatches =
           !targetKey ||
           (currentNorm &&
             (currentNorm.canonicalKey === targetKey ||
-              currentNorm.canonicalKey.includes(targetKey)));
+              currentNorm.canonicalKey.includes(targetKey))) ||
+          (al.currentCompany &&
+            al.currentCompany
+              .toLowerCase()
+              .includes(companyQuery.toLowerCase().trim()));
 
-        if (includePastHistory ? matchedEntries.length > 0 : currentMatches) {
-          return {
-            person: al,
-            currentNorm,
-            matchedEntries,
-          };
+        const passesCompanyQuery = includePastHistory
+          ? currentQueryMatches || matchedQueryEntries.length > 0
+          : currentQueryMatches;
+
+        if (!passesCompanyQuery) {
+          return null;
         }
-        return null;
+
+        // Matched entries to display
+        const matchedEntries = al.careerHistory.filter((entry) => {
+          const entryNorm = normalizeCompanyName(entry.company);
+          const qMatch =
+            !targetKey ||
+            entryNorm.canonicalKey === targetKey ||
+            entryNorm.canonicalKey.includes(targetKey) ||
+            entry.company
+              .toLowerCase()
+              .includes(companyQuery.toLowerCase().trim());
+          const cMatch =
+            !selectedCompanyNorm ||
+            entryNorm.canonicalKey === selectedCompanyNorm ||
+            entryNorm.canonicalKey.includes(selectedCompanyNorm);
+          const rMatch =
+            !selectedRole ||
+            (entry.roleTitle &&
+              entry.roleTitle.toLowerCase().trim() ===
+                selectedRole.toLowerCase().trim());
+          return qMatch && cMatch && rMatch;
+        });
+
+        return {
+          person: al,
+          currentNorm,
+          matchedEntries,
+        };
       })
       .filter((x): x is NonNullable<typeof x> => x !== null);
-  }, [alumniList, queryNorm.canonicalKey, includePastHistory]);
+  }, [
+    alumniList,
+    queryNorm.canonicalKey,
+    companyQuery,
+    selectedCompany,
+    selectedCollege,
+    selectedRole,
+    selectedLocation,
+    includePastHistory,
+  ]);
 
   const activeAlumnus =
     alumniList.find((a) => a.personId === selectedAlumnusId) || alumniList[0];
@@ -147,9 +319,8 @@ export const AlumniScreen: React.FC<AlumniScreenProps> = ({
         </div>
       )}
 
-      {/* Company Query + Visible Normalization Rules */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        <section className="lg:col-span-7 bg-white border border-neutral-200 rounded-2xl p-6 space-y-4 shadow-xs">
+      {/* Alumni Search & Directory */}
+      <section className="bg-white border border-neutral-200 rounded-2xl p-6 space-y-4 shadow-xs">
           <div className="border-b border-neutral-200 pb-3">
             <p className="section-kicker">COMPANY NORMALIZATION QUERY</p>
             <h2 className="font-display text-lg font-bold text-neutral-950 mt-0.5">
@@ -179,7 +350,7 @@ export const AlumniScreen: React.FC<AlumniScreenProps> = ({
                 className="w-full border border-neutral-300 rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-neutral-950"
               />
             </div>
-            <label className="inline-flex items-center gap-2 text-xs text-neutral-700 whitespace-nowrap">
+            <label className="inline-flex items-center gap-2 text-xs text-neutral-700 whitespace-nowrap self-center">
               <input
                 type="checkbox"
                 checked={includePastHistory}
@@ -189,7 +360,128 @@ export const AlumniScreen: React.FC<AlumniScreenProps> = ({
             </label>
           </div>
 
-          <div className="flex flex-wrap gap-1.5">
+          {/* LinkedIn-style Filters Bar */}
+          <div className="border border-neutral-200 rounded-xl p-3.5 bg-neutral-50/70 space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-neutral-500">
+                  Filters
+                </span>
+                <span className="text-[11px] font-medium text-neutral-500">
+                  ({matchingAlumni.length} of {alumniList.length} alumni)
+                </span>
+              </div>
+              {hasActiveFilters && (
+                <button
+                  type="button"
+                  onClick={handleClearFilters}
+                  className="inline-flex items-center gap-1 text-xs font-semibold text-neutral-900 hover:text-neutral-600 underline"
+                >
+                  <X className="w-3.5 h-3.5" aria-hidden="true" />
+                  <span>Clear filters</span>
+                </button>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+              {/* College Filter */}
+              <div>
+                <label
+                  htmlFor="filter-college"
+                  className="block text-[11px] font-semibold text-neutral-600 mb-1"
+                >
+                  College
+                </label>
+                <select
+                  id="filter-college"
+                  value={selectedCollege}
+                  onChange={(e) => setSelectedCollege(e.target.value)}
+                  className="w-full border border-neutral-300 rounded-lg px-2.5 py-1.5 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-neutral-950"
+                >
+                  <option value="">All Colleges</option>
+                  {collegeOptions.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Company Filter */}
+              <div>
+                <label
+                  htmlFor="filter-company"
+                  className="block text-[11px] font-semibold text-neutral-600 mb-1"
+                >
+                  Company
+                </label>
+                <select
+                  id="filter-company"
+                  value={selectedCompany}
+                  onChange={(e) => setSelectedCompany(e.target.value)}
+                  className="w-full border border-neutral-300 rounded-lg px-2.5 py-1.5 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-neutral-950"
+                >
+                  <option value="">All Companies</option>
+                  {companyOptions.map((comp) => (
+                    <option key={comp} value={comp}>
+                      {comp}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Job Role Filter */}
+              <div>
+                <label
+                  htmlFor="filter-role"
+                  className="block text-[11px] font-semibold text-neutral-600 mb-1"
+                >
+                  Job Role
+                </label>
+                <select
+                  id="filter-role"
+                  value={selectedRole}
+                  onChange={(e) => setSelectedRole(e.target.value)}
+                  className="w-full border border-neutral-300 rounded-lg px-2.5 py-1.5 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-neutral-950"
+                >
+                  <option value="">All Job Roles</option>
+                  {roleOptions.map((role) => (
+                    <option key={role} value={role}>
+                      {role}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Location Filter */}
+              <div>
+                <label
+                  htmlFor="filter-location"
+                  className="block text-[11px] font-semibold text-neutral-600 mb-1"
+                >
+                  Location
+                </label>
+                <select
+                  id="filter-location"
+                  value={selectedLocation}
+                  onChange={(e) => setSelectedLocation(e.target.value)}
+                  className="w-full border border-neutral-300 rounded-lg px-2.5 py-1.5 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-neutral-950"
+                >
+                  <option value="">All Locations</option>
+                  {locationOptions.map((loc) => (
+                    <option key={loc} value={loc}>
+                      {loc}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-[11px] font-medium text-neutral-500 mr-1">
+              Sample queries:
+            </span>
             {[
               'TCS',
               'Tata Consultancy Services Pvt Ltd',
@@ -253,7 +545,16 @@ export const AlumniScreen: React.FC<AlumniScreenProps> = ({
                       colSpan={5}
                       className="py-4 text-center text-neutral-500"
                     >
-                      No alumni matched &ldquo;{companyQuery}&rdquo;.
+                      No alumni matched the active filters.
+                      {hasActiveFilters && (
+                        <button
+                          type="button"
+                          onClick={handleClearFilters}
+                          className="ml-2 font-semibold text-neutral-900 underline"
+                        >
+                          Clear filters
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ) : (
@@ -276,6 +577,7 @@ export const AlumniScreen: React.FC<AlumniScreenProps> = ({
                           </p>
                           <p className="text-[11px] text-neutral-500">
                             {person.region}
+                            {person.college && ` · ${person.college}`}
                             {person.roles.includes('anchor') && ' · Active Anchor'}
                           </p>
                         </td>
@@ -301,51 +603,6 @@ export const AlumniScreen: React.FC<AlumniScreenProps> = ({
             </table>
           </div>
         </section>
-
-        {/* Visible Normalization Rules Card */}
-        <section className="lg:col-span-5 bg-white border border-neutral-200 rounded-2xl p-6 space-y-4 shadow-xs">
-          <div className="flex items-center gap-2 border-b border-neutral-200 pb-3">
-            <Sparkles className="w-5 h-5 text-neutral-950" aria-hidden="true" />
-            <div>
-              <p className="section-kicker">DETERMINISTIC RULES</p>
-              <h2 className="font-display text-lg font-bold text-neutral-950">
-                Visible Normalization Rules
-              </h2>
-            </div>
-          </div>
-
-          <ul className="space-y-2 text-xs text-neutral-700">
-            {VISIBLE_NORMALIZATION_RULES.map((rule) => (
-              <li
-                key={rule}
-                className="p-2.5 rounded-xl border border-neutral-200 bg-neutral-50"
-              >
-                {rule}
-              </li>
-            ))}
-          </ul>
-
-          <div className="border-t border-neutral-200 pt-3">
-            <p className="text-xs font-bold text-neutral-950 mb-2">
-              Alias Table Highlights
-            </p>
-            <div className="grid grid-cols-2 gap-1.5 text-[11px] font-mono">
-              <div className="p-2 rounded-lg bg-neutral-50 border border-neutral-200">
-                TCS → Tata Consultancy Services
-              </div>
-              <div className="p-2 rounded-lg bg-neutral-50 border border-neutral-200">
-                CTS → Cognizant
-              </div>
-              <div className="p-2 rounded-lg bg-neutral-50 border border-neutral-200">
-                INFY → Infosys
-              </div>
-              <div className="p-2 rounded-lg bg-neutral-50 border border-neutral-200">
-                HCL → HCLTech
-              </div>
-            </div>
-          </div>
-        </section>
-      </div>
 
       {/* Per-Alumnus Replayable Career History */}
       {activeAlumnus && (
