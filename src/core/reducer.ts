@@ -22,6 +22,17 @@ export const DEFAULT_APPLICATION_ANSWERS: ApplicationAnswers = {
   familyAnnualIncome: '',
   housingType: 'Rented',
   whyMaatram: '',
+  phone: '',
+  gender: 'Female',
+  dob: '2008-05-15',
+  identityRef: '',
+  fatherName: '',
+  motherName: '',
+  familyMembersCount: '4',
+  mediumOfInstruction: 'Tamil',
+  stream: 'Computer Science',
+  incomeSource: 'Daily wage tailoring',
+  eligibilityProofType: 'govt_school_attendance',
 };
 
 export const DEFAULT_CYCLES: Record<string, CycleConfig> = {
@@ -82,6 +93,9 @@ function createEmptyPerson(
 ): PersonProfile {
   return {
     personId,
+    applicationCode: `APP-${cycleId}-${personId.replace('P-2026-', '').replace('P-', '')}`,
+    identityRef: `MOCK-${personId}`,
+    otpVerified: false,
     cycleId,
     name: (payload?.fullName as string) || (payload?.name as string) || personId,
     email:
@@ -187,17 +201,6 @@ export function applyEvent(state: AppState, event: LifecycleEvent): AppState {
           applicationAnswers: mergedAnswers,
           roles: addRole(person.roles, 'applicant'),
           status: person.status === 'draft' ? 'draft' : person.status,
-          statusHistory: sortHistoryChronologically([
-            ...person.statusHistory,
-            {
-              eventId: event.id,
-              seq: event.seq,
-              stage: person.stage,
-              label: 'Application draft saved',
-              occurredAt: event.occurredAt,
-              actor: event.actor,
-            },
-          ]),
         };
         persons = { ...persons, [event.personId]: updated };
         break;
@@ -206,27 +209,39 @@ export function applyEvent(state: AppState, event: LifecycleEvent): AppState {
       case 'APPLICATION_SUBMITTED': {
         const answers = (payload.answers as Partial<ApplicationAnswers>) || {};
         const mergedAnswers = { ...person.applicationAnswers, ...answers };
+        const applicationCode =
+          (payload.applicationCode as string) ||
+          person.applicationCode ||
+          `APP-${event.cycleId}-${person.personId.replace('P-2026-', '').replace('P-', '')}`;
+        const identityRef =
+          (payload.identityRef as string) ||
+          mergedAnswers.identityRef ||
+          person.identityRef ||
+          `MOCK-${person.personId}`;
         const updated: PersonProfile = {
           ...person,
           name: mergedAnswers.fullName || person.name,
           email: (payload.email as string) || person.email,
-          phone: (payload.phone as string) || person.phone,
+          phone: (payload.phone as string) || mergedAnswers.phone || person.phone,
           region: (payload.region as string) || person.region,
           status: person.status === 'draft' ? 'applicant' : person.status,
           roles: addRole(person.roles, 'applicant'),
           stage: 'application',
           applicationAnswers: mergedAnswers,
           applicationSubmittedAt: event.occurredAt,
+          applicationCode,
+          identityRef,
+          otpVerified: true,
           statusHistory: sortHistoryChronologically([
             ...person.statusHistory,
             {
               eventId: event.id,
               seq: event.seq,
               stage: 'application',
-              label: 'Application submitted',
+              label: 'Applied',
               occurredAt: event.occurredAt,
               actor: event.actor,
-              note: `Cycle ${event.cycleId}`,
+              note: `Application Code: ${applicationCode}`,
             },
           ]),
         };
@@ -235,6 +250,14 @@ export function applyEvent(state: AppState, event: LifecycleEvent): AppState {
       }
 
       case 'VERIFIER_ASSIGNED': {
+        const isCompleted =
+          payload.teleStatus === 'Completed' ||
+          payload.physicalStatus === 'Completed';
+        const completionLabel =
+          payload.teleStatus === 'Completed'
+            ? 'Application completed televerification process'
+            : 'Application completed physical verification process';
+
         const updated: PersonProfile = {
           ...person,
           verifiers: {
@@ -251,18 +274,20 @@ export function applyEvent(state: AppState, event: LifecycleEvent): AppState {
               (payload.physicalStatus as PersonProfile['verifiers']['physicalStatus']) ??
               person.verifiers.physicalStatus,
           },
-          statusHistory: sortHistoryChronologically([
-            ...person.statusHistory,
-            {
-              eventId: event.id,
-              seq: event.seq,
-              stage: person.stage,
-              label: 'Alumni anchor verifier updated',
-              occurredAt: event.occurredAt,
-              actor: event.actor,
-              note: (payload.note as string) || undefined,
-            },
-          ]),
+          statusHistory: isCompleted
+            ? sortHistoryChronologically([
+              ...person.statusHistory,
+              {
+                eventId: event.id,
+                seq: event.seq,
+                stage: person.stage,
+                label: completionLabel,
+                occurredAt: event.occurredAt,
+                actor: event.actor,
+                note: (payload.note as string) || undefined,
+              },
+            ])
+            : person.statusHistory,
         };
         persons = { ...persons, [event.personId]: updated };
         break;
@@ -292,13 +317,19 @@ export function applyEvent(state: AppState, event: LifecycleEvent): AppState {
 
       case 'STAGE_ADVANCED': {
         const nextStage = (payload.stage as LifecycleStage) || person.stage;
+        const stageLabel =
+          nextStage === 'tele_verification'
+            ? 'Stage advanced to televerification'
+            : nextStage === 'physical_verification'
+              ? 'Stage advanced to physical verification'
+              : `Stage advanced to ${STAGE_LABELS[nextStage] || nextStage}`;
         const nextHistory = sortHistoryChronologically([
           ...person.statusHistory,
           {
             eventId: event.id,
             seq: event.seq,
             stage: nextStage,
-            label: `Stage advanced to ${STAGE_LABELS[nextStage] || nextStage}`,
+            label: stageLabel,
             occurredAt: event.occurredAt,
             actor: event.actor,
             note: payload.reason as string | undefined,
@@ -469,19 +500,8 @@ export function applyEvent(state: AppState, event: LifecycleEvent): AppState {
         };
         const updated: PersonProfile = {
           ...person,
-          documents: [...person.documents, doc],
-          statusHistory: sortHistoryChronologically([
-            ...person.statusHistory,
-            {
-              eventId: event.id,
-              seq: event.seq,
-              stage: person.stage,
-              label: `Document uploaded: ${doc.label}`,
-              occurredAt: event.occurredAt,
-              actor: event.actor,
-              note: doc.fileName,
-            },
-          ]),
+          // Replace prior document if same label is re-uploaded
+          documents: [...person.documents.filter((d) => d.label !== doc.label), doc],
         };
         persons = { ...persons, [event.personId]: updated };
         break;
@@ -529,13 +549,13 @@ export function applyEvent(state: AppState, event: LifecycleEvent): AppState {
             ? addRole(addRole(nextRoles, 'selected'), 'alumni')
             : nextStatus === 'anchor'
               ? addRole(
-                  addRole(addRole(nextRoles, 'selected'), 'alumni'),
-                  'anchor'
-                )
+                addRole(addRole(nextRoles, 'selected'), 'alumni'),
+                'anchor'
+              )
               : nextRoles;
         const nextStage =
           (nextStatus === 'alumni' || nextStatus === 'anchor') &&
-          !person.applicationSubmittedAt
+            !person.applicationSubmittedAt
             ? 'selected'
             : person.stage;
         const updated: PersonProfile = {
@@ -583,14 +603,14 @@ export function applyEvent(state: AppState, event: LifecycleEvent): AppState {
         const nextCgpa =
           existingIdx >= 0
             ? person.cgpaHistory.map((item, idx) =>
-                idx === existingIdx
-                  ? { semester, gpa, recordedAt: event.occurredAt }
-                  : item
-              )
+              idx === existingIdx
+                ? { semester, gpa, recordedAt: event.occurredAt }
+                : item
+            )
             : [
-                ...person.cgpaHistory,
-                { semester, gpa, recordedAt: event.occurredAt },
-              ];
+              ...person.cgpaHistory,
+              { semester, gpa, recordedAt: event.occurredAt },
+            ];
         persons = {
           ...persons,
           [event.personId]: {
@@ -666,7 +686,7 @@ export function applyEvent(state: AppState, event: LifecycleEvent): AppState {
           : person.roles;
         const updatedStatus =
           nextPlacement.offerStatus === 'Alumni Employed' &&
-          person.status === 'student'
+            person.status === 'student'
             ? 'alumni'
             : person.status;
         persons = {
@@ -678,7 +698,7 @@ export function applyEvent(state: AppState, event: LifecycleEvent): AppState {
             placementRecord: nextPlacement,
             currentCompany:
               nextPlacement.offerStatus === 'Alumni Employed' &&
-              nextPlacement.placedCompany
+                nextPlacement.placedCompany
                 ? nextPlacement.placedCompany
                 : person.currentCompany,
           },
@@ -694,8 +714,8 @@ export function applyEvent(state: AppState, event: LifecycleEvent): AppState {
           startYear: Number(payload.startYear),
           endYear:
             payload.endYear !== undefined &&
-            payload.endYear !== null &&
-            payload.endYear !== ''
+              payload.endYear !== null &&
+              payload.endYear !== ''
               ? Number(payload.endYear)
               : undefined,
           source: payload.source as 'self-reported' | 'referral' | 'placement',
@@ -1012,11 +1032,11 @@ export function applyEvent(state: AppState, event: LifecycleEvent): AppState {
               leaveRequests: mtg.leaveRequests.map((lr) =>
                 lr.leaveId === leaveId
                   ? {
-                      ...lr,
-                      status: decision,
-                      reviewedBy: event.actor,
-                      reviewedAt: event.occurredAt,
-                    }
+                    ...lr,
+                    status: decision,
+                    reviewedBy: event.actor,
+                    reviewedAt: event.occurredAt,
+                  }
                   : lr
               ),
             },

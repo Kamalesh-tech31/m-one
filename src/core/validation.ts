@@ -70,6 +70,19 @@ export const applicationSchema = z.object({
       20,
       'Please share at least 20 characters explaining why you are applying to Maatram.'
     ),
+  phone: z.string().optional(),
+  gender: z.string().optional(),
+  dob: z.string().optional(),
+  identityRef: z.string().optional(),
+  fatherName: z.string().optional(),
+  motherName: z.string().optional(),
+  familyMembersCount: z.string().optional(),
+  mediumOfInstruction: z.string().optional(),
+  stream: z.string().optional(),
+  incomeSource: z.string().optional(),
+  eligibilityProofType: z
+    .enum(['school_fee_receipt', 'govt_school_attendance', 'employment_proof'])
+    .optional(),
 });
 
 export interface ApplicationValidationResult {

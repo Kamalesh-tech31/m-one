@@ -36,31 +36,31 @@ const ROLES_LIST: Array<{
   tagline: string;
   icon: React.ComponentType<{ className?: string }>;
 }> = [
-  {
-    role: 'applicant',
-    title: 'Applicant',
-    tagline: 'Track your application',
-    icon: FileText,
-  },
-  {
-    role: 'student',
-    title: 'Student',
-    tagline: 'Learning and volunteering',
-    icon: GraduationCap,
-  },
-  {
-    role: 'anchor',
-    title: 'Anchor',
-    tagline: 'Mentor your cohort',
-    icon: Users,
-  },
-  {
-    role: 'admin',
-    title: 'Admin',
-    tagline: 'Review and verify',
-    icon: ShieldCheck,
-  },
-];
+    {
+      role: 'applicant',
+      title: 'Applicant',
+      tagline: 'Track your application',
+      icon: FileText,
+    },
+    {
+      role: 'student',
+      title: 'Student',
+      tagline: 'Learning and volunteering',
+      icon: GraduationCap,
+    },
+    {
+      role: 'anchor',
+      title: 'Anchor',
+      tagline: 'Mentor your cohort',
+      icon: Users,
+    },
+    {
+      role: 'admin',
+      title: 'Admin',
+      tagline: 'Review and verify',
+      icon: ShieldCheck,
+    },
+  ];
 
 export const LoginScreen: React.FC<LoginScreenProps> = ({
   onLogin,
@@ -89,6 +89,39 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
   const [otpInput, setOtpInput] = useState('');
   const [otpError, setOtpError] = useState('');
 
+  // Applicant 2-step verification: Enter generated code
+  const [applicantAwaitingCode, setApplicantAwaitingCode] = useState(false);
+  const [pendingApplicantUser, setPendingApplicantUser] = useState<AuthSessionUser | null>(null);
+  const [expectedApplicantCode, setExpectedApplicantCode] = useState<string>('APP-2026-07');
+  const [applicantCodeInput, setApplicantCodeInput] = useState('');
+  const [applicantCodeError, setApplicantCodeError] = useState('');
+
+  // Recent applicant from prototype localStorage
+  const [recentApplicant, setRecentApplicant] = useState<{
+    email: string;
+    applicationCode: string;
+  } | null>(null);
+
+  React.useEffect(() => {
+    try {
+      const raw = localStorage.getItem('maatram_submitted_applicants');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const last = parsed[parsed.length - 1];
+          if (last.email && last.applicationCode) {
+            setRecentApplicant({
+              email: last.email,
+              applicationCode: last.applicationCode,
+            });
+          }
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
   const currentRoleConfig = selectedRole
     ? ROLES_LIST.find((r) => r.role === selectedRole)
     : null;
@@ -108,7 +141,45 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
 
     const result = verifyRoleCredentials(selectedRole, email, password);
     if (!result.valid || !result.user) {
-      setErrorMsg(result.error || 'Invalid credentials.');
+      setErrorMsg(result.error || 'Invalid email or password.');
+      return;
+    }
+
+    // Applicant role: user signs in with the generated code
+    if (selectedRole === 'applicant') {
+      let code = 'APP-2026-07';
+      try {
+        const stored = localStorage.getItem('maatram_submitted_applicants');
+        if (stored) {
+          const list = JSON.parse(stored);
+          const found = list.find(
+            (a: any) =>
+              a.email && a.email.toLowerCase() === email.trim().toLowerCase()
+          );
+          if (found && found.applicationCode) {
+            code = found.applicationCode;
+          }
+        }
+      } catch {
+        // fallback
+      }
+
+      // If applicant signed in with the generated code directly as password, log in immediately!
+      const passClean = password.trim().toUpperCase();
+      if (
+        passClean === code.trim().toUpperCase() ||
+        passClean === 'APP-2026-07' ||
+        passClean === 'P-2026-07'
+      ) {
+        onLogin(result.user);
+        return;
+      }
+
+      setPendingApplicantUser(result.user);
+      setExpectedApplicantCode(code);
+      setApplicantAwaitingCode(true);
+      setApplicantCodeInput('');
+      setApplicantCodeError('');
       return;
     }
 
@@ -122,6 +193,35 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
     }
 
     onLogin(result.user);
+  };
+
+  const handleVerifyApplicantCode = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!pendingApplicantUser) return;
+    const inputCode = applicantCodeInput.trim().toUpperCase();
+    const expected = expectedApplicantCode.trim().toUpperCase();
+
+    if (!inputCode) {
+      setApplicantCodeError('Please enter your generated code.');
+      return;
+    }
+
+    const isValid =
+      inputCode === expected ||
+      inputCode === 'APP-2026-07' ||
+      inputCode === 'P-2026-07' ||
+      (expected && inputCode === expected.replace('APP-', 'P-')) ||
+      (expected && inputCode === expected.replace('P-', 'APP-'));
+
+    if (!isValid) {
+      setApplicantCodeError(
+        `Invalid code. Please enter the generated code for your application (e.g. ${expectedApplicantCode}).`
+      );
+      return;
+    }
+
+    // Only then can they view the status
+    onLogin(pendingApplicantUser);
   };
 
   const handleVerifyOtp = (e: React.FormEvent) => {
@@ -144,6 +244,10 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
     setErrorMsg('');
     setAdminAwaitingOtp(false);
     setPendingAdminUser(null);
+    setApplicantAwaitingCode(false);
+    setPendingApplicantUser(null);
+    setApplicantCodeInput('');
+    setApplicantCodeError('');
     navigate('/login');
   };
 
@@ -267,17 +371,75 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
           {/* Header */}
           <div className="space-y-1">
             <h1 className="font-display text-2xl font-extrabold tracking-tight text-neutral-950">
-              {adminAwaitingOtp ? 'Admin Verification Code' : roleTitle}
+              {applicantAwaitingCode
+                ? 'Enter Generated Code'
+                : adminAwaitingOtp
+                  ? 'Admin Verification Code'
+                  : roleTitle}
             </h1>
             <p className="text-xs text-neutral-500">
-              {adminAwaitingOtp
-                ? 'Enter the 6-digit one-time code to confirm your administrative access.'
-                : `Enter your credentials to access the ${currentRoleConfig?.title.toLowerCase()} portal.`}
+              {applicantAwaitingCode
+                ? 'Enter your generated Application Code to view your application status.'
+                : adminAwaitingOtp
+                  ? 'Enter the 6-digit one-time code to confirm your administrative access.'
+                  : `Enter your credentials to access the ${currentRoleConfig?.title.toLowerCase()} portal.`}
             </p>
           </div>
 
-          {/* Admin Mock OTP Step */}
-          {adminAwaitingOtp ? (
+          {/* Applicant Generated Code Step: Only then can they view the status */}
+          {applicantAwaitingCode ? (
+            <form onSubmit={handleVerifyApplicantCode} className="space-y-4">
+              <div className="space-y-1.5">
+                <label
+                  htmlFor="applicant-code-input"
+                  className="block text-xs font-bold text-neutral-900"
+                >
+                  Generated Application Code
+                </label>
+                <input
+                  id="applicant-code-input"
+                  type="text"
+                  value={applicantCodeInput}
+                  onChange={(e) => {
+                    setApplicantCodeInput(e.target.value);
+                    setApplicantCodeError('');
+                  }}
+                  placeholder={expectedApplicantCode || 'APP-2026-07'}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-neutral-300 focus:outline-none focus:border-neutral-950 font-mono text-center tracking-widest text-base font-bold uppercase"
+                  autoFocus
+                />
+                <p className="text-[11px] text-neutral-400">
+                  Demo hint: Enter generated code{' '}
+                  <span className="font-mono font-bold text-neutral-700">
+                    {expectedApplicantCode || 'APP-2026-07'}
+                  </span>{' '}
+                  to view status
+                </p>
+              </div>
+
+              {applicantCodeError && (
+                <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-red-900 text-xs font-medium">
+                  {applicantCodeError}
+                </div>
+              )}
+
+              <button
+                type="submit"
+                className="w-full flex items-center justify-center gap-2 px-5 py-3 rounded-xl font-bold text-sm bg-[#FFC20E] text-neutral-950 hover:bg-[#e5ae0b] transition-colors"
+              >
+                <span>Verify & View Status</span>
+                <ArrowRight className="w-4 h-4" />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setApplicantAwaitingCode(false)}
+                className="w-full text-center text-xs font-semibold text-neutral-500 hover:text-neutral-950"
+              >
+                Change login credentials
+              </button>
+            </form>
+          ) : adminAwaitingOtp ? (
             <form onSubmit={handleVerifyOtp} className="space-y-4">
               <div className="space-y-1.5">
                 <label
@@ -327,7 +489,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
               </button>
             </form>
           ) : (
-            /* Regular Credentials Form */
+            /* Regular Credentials Form - Unaltered */
             <form onSubmit={handleSignIn} className="space-y-4">
               <div className="space-y-1.5">
                 <label
@@ -448,6 +610,22 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
                           {demoAccountInfo.password}
                         </code>
                       </p>
+                      {selectedRole === 'applicant' && (
+                        <p className="text-neutral-600">
+                          <span className="font-semibold text-neutral-900">Generated Code:</span>{' '}
+                          <code className="font-mono bg-white px-1.5 py-0.5 rounded border border-neutral-200">
+                            APP-2026-07
+                          </code>
+                        </p>
+                      )}
+                      {selectedRole === 'applicant' && (
+                        <p className="text-neutral-600">
+                          <span className="font-semibold text-neutral-900">Generated Code:</span>{' '}
+                          <code className="font-mono bg-white px-1.5 py-0.5 rounded border border-neutral-200">
+                            APP-2026-07
+                          </code>
+                        </p>
+                      )}
                       <p className="text-[11px] text-neutral-500 italic">
                         {demoAccountInfo.subtitle}
                       </p>

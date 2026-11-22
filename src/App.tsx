@@ -74,13 +74,22 @@ function ApplicantViewWrapper({
 }) {
   const { tab } = useParams<{ tab?: string }>();
   if (!scopedData) return null;
+
+  // In the applicant track, after entry the system checks whether the applicant is new.
+  // If so, it displays the application form and its details for completion.
+  // Once logged in with the generated code, it grants access to view the application status.
+  const isNewApplicant = !scopedData.ownProfile?.applicationSubmittedAt;
+  const effectiveTab: ApplicantTab = isNewApplicant
+    ? 'form'
+    : ((tab as ApplicantTab) || 'application');
+
   return (
     <ApplicantScreen
       scoped={scopedData}
       actorName={currentActor}
       onUpdateSessionName={updateCurrentUserName}
       onAppend={append}
-      activeTab={(tab as ApplicantTab) || 'application'}
+      activeTab={effectiveTab}
       showToast={showToast}
     />
   );
@@ -252,7 +261,7 @@ export default function App() {
   const handleStartPublicApplication = () => {
     setToastMessage('');
     startPublicApplicationDraft();
-    navigate('/applicant');
+    navigate('/applicant/form');
   };
 
   const handleLogoutOrSwitch = () => {

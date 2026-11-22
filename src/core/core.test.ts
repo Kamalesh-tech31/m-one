@@ -29,6 +29,7 @@ import {
   verifyRoleCredentials,
 } from './scoping';
 import { buildSeedEvents } from './seed';
+import { createSafeDemoBlob, generateRandomApplicantData } from './demoGenerator';
 
 function makeEvent(
   partial: Partial<LifecycleEvent> & Pick<LifecycleEvent, 'id' | 'seq' | 'type' | 'personId'>
@@ -464,13 +465,11 @@ describe('Maatram One Role Auth, Route Guard & Scoping', () => {
     expect(applicantItems.map((i) => i.label)).toEqual([
       'Application',
       'Form',
-      'Documents',
       'Status history',
     ]);
     expect(applicantItems.map((i) => i.path)).toEqual([
       '/applicant/application',
       '/applicant/form',
-      '/applicant/documents',
       '/applicant/history',
     ]);
 
@@ -772,5 +771,189 @@ describe('Maatram One Follow-up 3 Manrope-Only Typography', () => {
     const bodyFont = "'Manrope', system-ui, -apple-system, sans-serif";
     expect(resolveComputedStartFont(bodyFont, bodyFont)).toBe('Manrope');
     expect(resolveComputedStartFont('inherit', bodyFont)).toBe('Manrope');
+  });
+
+  it('supports applicant application workflow with applicationCode, mock identity reference and Application Code sign-in', () => {
+    // 1. Submit event reduces applicationCode, identityRef, and otpVerified
+    const submitEvent = makeEvent({
+      id: 'EV-APP-SUBMIT-1',
+      seq: 101,
+      type: 'APPLICATION_SUBMITTED',
+      personId: 'P-2026-99',
+      actor: 'Priya S',
+      payload: {
+        email: 'priya.s@demo.local',
+        region: 'Chennai',
+        applicationCode: 'APP-2026-99',
+        identityRef: 'MOCK-TN-2026-99',
+        answers: {
+          fullName: 'Priya S',
+          schoolName: 'Govt Model HSS',
+          schoolType: 'Government',
+          tenthMarks: '480 / 500',
+          twelfthMarks: '575 / 600',
+          parentOccupation: 'Weaver',
+          familyAnnualIncome: 'Rs 75,000',
+          housingType: 'Rented',
+          whyMaatram: 'Mentorship and financial aid for engineering education.',
+          phone: '9840123456',
+          identityRef: 'MOCK-TN-2026-99',
+        },
+      },
+    });
+
+    const state = applyEvent(foldEvents(buildSeedEvents()), submitEvent);
+    const applicant = state.persons['P-2026-99'];
+    expect(applicant).toBeDefined();
+    expect(applicant.applicationCode).toBe('APP-2026-99');
+    expect(applicant.identityRef).toBe('MOCK-TN-2026-99');
+    expect(applicant.otpVerified).toBe(true);
+    expect(applicant.statusHistory.some((h) => h.note?.includes('APP-2026-99'))).toBe(true);
+
+    // 2. verifyRoleCredentials accepts demo applicant credentials or application code
+    const credsCheck = verifyRoleCredentials('applicant', 'divya.r@maatram.demo', 'APP-2026-07');
+    expect(credsCheck.valid).toBe(true);
+    expect(credsCheck.user?.role).toBe('applicant');
+
+    const passCheck = verifyRoleCredentials('applicant', 'divya.r@maatram.demo', 'Demo@123');
+    expect(passCheck.valid).toBe(true);
+  });
+
+  it('generateRandomApplicantData produces a complete, correctly mapped demo applicant with Application Code and safe demo documents', () => {
+    const first = generateRandomApplicantData();
+    const second = generateRandomApplicantData();
+
+    // 1. Application Code
+    expect(first.applicationCode).toMatch(/^APP-2026-\d{2}$/);
+
+    // 2. Personal Details
+    expect(first.answers.fullName).toBeTruthy();
+    expect(first.answers.gender).toMatch(/^(Female|Male)$/);
+    expect(first.answers.dob).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(first.answers.phone).toMatch(/^\d{10}$/);
+    expect(first.answers.identityRef).toMatch(/^MOCK-TN-2026-\d{4}$/);
+    expect(first.answers.fatherName).toBeTruthy();
+    expect(first.answers.motherName).toBeTruthy();
+    expect(first.answers.familyMembersCount).toMatch(/^[345]$/);
+    expect(first.answers.address).toBeTruthy();
+    expect(first.answers.district).toBe(first.region);
+    expect(first.answers.state).toBe('Tamil Nadu');
+    expect(first.email).toMatch(/@demo\.local$/);
+    expect(first.otp).toMatch(/^\d{6}$/);
+
+    // 3. Educational Details & Mathematical Consistency
+    expect(first.answers.academicYear).toBe('2026–2027');
+    expect(first.answers.schoolName).toBeTruthy();
+    expect(first.answers.schoolType).toMatch(/^(Government|Private)$/);
+    expect(first.answers.mediumOfInstruction).toMatch(/^(Tamil|English)$/);
+    expect(first.answers.stream).toBeTruthy();
+
+    const tenthMatch = first.answers.tenthMarks.match(/^(\d+)\s*\/\s*500\s*\((\d+\.\d+)%\)$/);
+    expect(tenthMatch).toBeTruthy();
+    if (tenthMatch) {
+      const obtained = Number(tenthMatch[1]);
+      const pct = Number(tenthMatch[2]);
+      expect(obtained).toBeLessThanOrEqual(500);
+      expect(pct).toBeCloseTo((obtained / 500) * 100, 1);
+    }
+
+    const twelfthMatch = first.answers.twelfthMarks.match(/^(\d+)\s*\/\s*600\s*\((\d+\.\d+)%\)$/);
+    expect(twelfthMatch).toBeTruthy();
+    if (twelfthMatch) {
+      const obtained = Number(twelfthMatch[1]);
+      const pct = Number(twelfthMatch[2]);
+      expect(obtained).toBeLessThanOrEqual(600);
+      expect(pct).toBeCloseTo((obtained / 600) * 100, 1);
+    }
+
+    // 4. Financial Details
+    expect(first.answers.familyAnnualIncome).toMatch(/^Rs \d{2,3},\d{3}$/);
+    expect(first.answers.parentOccupation).toBeTruthy();
+    expect(first.answers.incomeSource).toBeTruthy();
+    expect(first.answers.monthlyRent).toMatch(/^Rs \d,\d{3}$/);
+    expect(first.answers.schoolFees).toMatch(/^Rs \d,\d{3}$/);
+    expect(first.answers.electricityBillAmount).toMatch(/^Rs \d{3}$/);
+    expect(first.answers.otherExpenses).toBeTruthy();
+    expect(first.answers.outstandingLoans).toBeTruthy();
+
+    // 5. Safe Sample Documents
+    const docFileNames = first.documents.map((d) => d.fileName);
+    expect(docFileNames).toContain('income_certificate_demo.pdf');
+    expect(docFileNames).toContain('electricity_bill_demo.pdf');
+    expect(docFileNames).toContain('marksheet_10th_demo.pdf');
+    expect(docFileNames).toContain('marksheet_12th_demo.pdf');
+    expect(docFileNames).toContain('residence_front_demo.jpg');
+    expect(first.documents.every((d) => d.description.includes('DEMO / SAMPLE'))).toBe(true);
+
+    // 6. Safe demo blob creation
+    const sampleBlob = createSafeDemoBlob(
+      'Income Certificate',
+      'income_certificate_demo.pdf',
+      first.answers.fullName
+    );
+    expect(sampleBlob.size).toBeGreaterThan(0);
+    expect(sampleBlob.type).toBe('application/pdf');
+
+    // 7. Reducer Document Replacement (replaces instead of duplicate accumulation)
+    const testPerson = {
+      personId: 'P-TEST-DEDUP',
+      fullName: 'Test Candidate',
+      email: 'test@demo.local',
+      documents: [],
+      roles: ['applicant' as const],
+      stage: 'applied' as const,
+      cycleId: '2026',
+      region: 'Chennai',
+      statusHistory: [],
+    };
+    let state = foldEvents(buildSeedEvents());
+    state.persons['P-TEST-DEDUP'] = testPerson as any;
+
+    const event1: LifecycleEvent = {
+      id: 'EV-1',
+      seq: 9991,
+      type: 'DOCUMENT_UPLOADED',
+      personId: 'P-TEST-DEDUP',
+      actor: 'Tester',
+      cycleId: '2026',
+      occurredAt: '2026-11-22T10:00:00.000Z',
+      recordedAt: '2026-11-22T10:00:00.000Z',
+      payload: {
+        docId: 'D1',
+        label: 'Income Certificate',
+        fileName: 'income_certificate_demo.pdf',
+        fileType: 'application/pdf',
+        fileSize: 1000,
+        signedUrl: '/mock/1',
+      },
+    };
+    state = applyEvent(state, event1);
+    expect(state.persons['P-TEST-DEDUP'].documents.length).toBe(1);
+
+    const event2: LifecycleEvent = {
+      id: 'EV-2',
+      seq: 9992,
+      type: 'DOCUMENT_UPLOADED',
+      personId: 'P-TEST-DEDUP',
+      actor: 'Tester',
+      cycleId: '2026',
+      occurredAt: '2026-11-22T10:05:00.000Z',
+      recordedAt: '2026-11-22T10:05:00.000Z',
+      payload: {
+        docId: 'D2',
+        label: 'Income Certificate',
+        fileName: 'income_certificate_demo.pdf',
+        fileType: 'application/pdf',
+        fileSize: 1200,
+        signedUrl: '/mock/2',
+      },
+    };
+    state = applyEvent(state, event2);
+    expect(state.persons['P-TEST-DEDUP'].documents.length).toBe(1);
+    expect(state.persons['P-TEST-DEDUP'].documents[0].docId).toBe('D2');
+
+    // 8. Distinct on repeated generation
+    expect(first.answers.identityRef).not.toBe(second.answers.identityRef);
+    expect(first.email).not.toBe(second.email);
   });
 });

@@ -5,12 +5,16 @@ import {
   CheckCircle2,
   ClipboardCheck,
   Clock,
+  Eye,
+  FileCheck,
+  FileText,
   KeyRound,
   Lock,
   MapPin,
   Settings,
   ShieldAlert,
   Users,
+  X,
 } from 'lucide-react';
 import {
   Bar,
@@ -82,6 +86,7 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
   const [rejectTargetId, setRejectTargetId] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState('');
   const [rejectError, setRejectError] = useState('');
+  const [inspectingApplicantId, setInspectingApplicantId] = useState<string | null>(null);
 
   // Sampled request creation (4 types)
   const [sampleType, setSampleType] = useState<SampledRequestType>(
@@ -132,6 +137,7 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
         return (
           p.name.toLowerCase().includes(q) ||
           p.personId.toLowerCase().includes(q) ||
+          (p.applicationCode && p.applicationCode.toLowerCase().includes(q)) ||
           p.region.toLowerCase().includes(q)
         );
       }
@@ -591,18 +597,19 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
                 <thead>
                   <tr className="border-b border-neutral-200 bg-neutral-50 text-neutral-500 font-semibold">
                     <th className="py-3 px-4 w-8">Pick</th>
-                    <th className="py-3 px-4">Applicant</th>
-                    <th className="py-3 px-4">Cycle</th>
+                    <th className="py-3 px-4">Application Code & Applicant</th>
+                    <th className="py-3 px-4">Academic Year</th>
                     <th className="py-3 px-4">School & Marks</th>
+                    <th className="py-3 px-4">Uploaded Documents</th>
                     <th className="py-3 px-4">Address Verification Mode</th>
-                    <th className="py-3 px-4">Stage</th>
+                    <th className="py-3 px-4">Stage & Status</th>
                     <th className="py-3 px-4 text-right">Decision</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-neutral-100">
                   {applicantList.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="py-8 text-center text-neutral-500">
+                      <td colSpan={8} className="py-8 text-center text-neutral-500">
                         No applicants found.
                       </td>
                     </tr>
@@ -613,6 +620,11 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
                       const hasAddressProof = p.documents.some(
                         (d) => d.label === 'Address Proof'
                       );
+                      const appCode =
+                        p.applicationCode ||
+                        `APP-${p.cycleId}-${p.personId.replace('P-2026-', '').replace('P-', '')}`;
+                      const docNames = p.documents.map((d) => d.label);
+
                       return (
                         <tr key={p.personId} className="hover:bg-neutral-50">
                           <td className="py-3 px-4">
@@ -624,25 +636,84 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
                             />
                           </td>
                           <td className="py-3 px-4">
-                            <p className="font-semibold text-neutral-950">
-                              {p.name}
-                            </p>
-                            <p className="text-[11px] font-mono text-neutral-500">
+                            <div className="flex items-center gap-2">
+                              <span className="font-mono font-bold text-neutral-950 bg-neutral-100 px-2 py-0.5 rounded text-[11px] border border-neutral-200">
+                                {appCode}
+                              </span>
+                              <span className="font-semibold text-neutral-950">
+                                {p.name}
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-neutral-500 mt-0.5">
                               {p.personId} · {p.region}
+                              {p.applicationAnswers.identityRef && (
+                                <span className="font-mono text-neutral-400 ml-1">
+                                  ({p.applicationAnswers.identityRef})
+                                </span>
+                              )}
                               {p.shortlisted && ' · Shortlisted'}
                             </p>
                           </td>
-                          <td className="py-3 px-4 font-mono tabular-nums">
-                            {p.cycleId}
+                          <td className="py-3 px-4">
+                            <span className="font-mono tabular-nums text-neutral-800">
+                              {p.cycleId === '2026'
+                                ? '2026–27'
+                                : p.cycleId === '2025'
+                                  ? '2025–26'
+                                  : '2024–25'}
+                            </span>
+                            <span className="block text-[10px] text-neutral-400">
+                              Cycle {p.cycleId}
+                            </span>
                           </td>
                           <td className="py-3 px-4">
-                            <p className="text-neutral-800">
-                              {p.applicationAnswers.schoolType} ·{' '}
-                              {p.applicationAnswers.twelfthMarks || '—'}
+                            <p className="text-neutral-900 font-medium">
+                              {p.applicationAnswers.schoolName ||
+                                `${p.applicationAnswers.schoolType} School`}
                             </p>
-                            <p className="text-[11px] text-neutral-500 truncate max-w-[200px]">
-                              {p.applicationAnswers.familyAnnualIncome || '—'}
+                            <p className="text-[11px] text-neutral-600">
+                              10th:{' '}
+                              <span className="font-mono font-semibold">
+                                {p.applicationAnswers.tenthMarks || '—'}
+                              </span>{' '}
+                              · 12th:{' '}
+                              <span className="font-mono font-semibold">
+                                {p.applicationAnswers.twelfthMarks || '—'}
+                              </span>
                             </p>
+                            <p className="text-[10px] text-neutral-400 truncate max-w-[180px]">
+                              Income: {p.applicationAnswers.familyAnnualIncome || '—'}
+                            </p>
+                          </td>
+                          <td className="py-3 px-4">
+                            {docNames.length === 0 ? (
+                              <span className="text-[11px] text-neutral-400 italic">
+                                No uploads
+                              </span>
+                            ) : (
+                              <div className="space-y-1 max-w-[200px]">
+                                <div className="flex flex-wrap gap-1">
+                                  {docNames.slice(0, 3).map((dname, idx) => (
+                                    <span
+                                      key={idx}
+                                      className="inline-block px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-800 text-[10px] font-medium truncate max-w-[150px]"
+                                      title={dname}
+                                    >
+                                      {dname}
+                                    </span>
+                                  ))}
+                                  {docNames.length > 3 && (
+                                    <span className="inline-block px-1.5 py-0.5 rounded bg-neutral-200 text-neutral-700 text-[10px] font-bold">
+                                      +{docNames.length - 3} more
+                                    </span>
+                                  )}
+                                </div>
+                                <span className="text-[10px] text-neutral-400 block font-mono">
+                                  {docNames.length} file
+                                  {docNames.length > 1 ? 's' : ''} attached
+                                </span>
+                              </div>
+                            )}
                           </td>
                           <td className="py-3 px-4">
                             {hasAddressProof ? (
@@ -673,7 +744,7 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
                           </td>
                           <td className="py-3 px-4">
                             <span
-                              className={`rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${
+                              className={`rounded-full px-2.5 py-0.5 text-[11px] font-semibold whitespace-nowrap ${
                                 p.stage === 'selected'
                                   ? 'bg-neutral-950 text-white'
                                   : p.stage === 'rejected'
@@ -685,36 +756,47 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
                             </span>
                           </td>
                           <td className="py-3 px-4 text-right whitespace-nowrap">
-                            {!isFinal ? (
-                              <div className="inline-flex gap-1.5">
-                                <button
-                                  type="button"
-                                  onClick={() => handleSelectApplicant(p.personId)}
-                                  className="px-3 py-1 rounded-lg text-xs font-semibold bg-neutral-950 text-white hover:bg-neutral-800"
-                                >
-                                  Select
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setRejectTargetId(p.personId);
-                                    setRejectReason('');
-                                    setRejectError('');
-                                  }}
-                                  className="px-3 py-1 rounded-lg text-xs font-medium border border-neutral-950 text-neutral-950 bg-white hover:bg-neutral-50"
-                                >
-                                  Reject
-                                </button>
-                              </div>
-                            ) : p.joinCode ? (
-                              <span className="text-[11px] font-semibold tracking-[0.08em] tabular-nums text-neutral-700">
-                                {p.joinCode}
-                              </span>
-                            ) : (
-                              <span className="text-[11px] text-neutral-500">
-                                Closed
-                              </span>
-                            )}
+                            <div className="inline-flex items-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => setInspectingApplicantId(p.personId)}
+                                className="px-2.5 py-1 rounded-lg text-xs font-semibold border border-neutral-300 bg-white text-neutral-800 hover:bg-neutral-100 transition-colors inline-flex items-center gap-1"
+                                title="View Application Details"
+                              >
+                                <Eye className="w-3.5 h-3.5 text-neutral-500" />
+                                <span>Details</span>
+                              </button>
+                              {!isFinal ? (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSelectApplicant(p.personId)}
+                                    className="px-3 py-1 rounded-lg text-xs font-semibold bg-neutral-950 text-white hover:bg-neutral-800"
+                                  >
+                                    Select
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setRejectTargetId(p.personId);
+                                      setRejectReason('');
+                                      setRejectError('');
+                                    }}
+                                    className="px-3 py-1 rounded-lg text-xs font-medium border border-neutral-950 text-neutral-950 bg-white hover:bg-neutral-50"
+                                  >
+                                    Reject
+                                  </button>
+                                </>
+                              ) : p.joinCode ? (
+                                <span className="text-[11px] font-semibold tracking-[0.08em] tabular-nums text-neutral-700">
+                                  {p.joinCode}
+                                </span>
+                              ) : (
+                                <span className="text-[11px] text-neutral-500">
+                                  Closed
+                                </span>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       );
@@ -724,6 +806,234 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
               </table>
             </div>
           </div>
+
+          {/* Full Application Details Inspection Modal */}
+          {inspectingApplicantId && scoped.persons[inspectingApplicantId] && (() => {
+            const insp = scoped.persons[inspectingApplicantId];
+            const inspAnswers = insp.applicationAnswers;
+            const inspCode =
+              insp.applicationCode ||
+              `APP-${insp.cycleId}-${insp.personId.replace('P-2026-', '').replace('P-', '')}`;
+
+            return (
+              <div
+                role="dialog"
+                aria-modal="true"
+                className="fixed inset-0 z-50 bg-neutral-950/40 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto"
+              >
+                <div className="bg-white border border-neutral-200 rounded-3xl max-w-3xl w-full p-6 sm:p-8 space-y-6 shadow-xl max-h-[90vh] overflow-y-auto">
+                  {/* Modal Header */}
+                  <div className="flex items-start justify-between border-b border-neutral-200 pb-4">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-xs font-bold bg-neutral-950 text-white px-2.5 py-0.5 rounded-full">
+                          {inspCode}
+                        </span>
+                        <h2 className="font-display text-xl font-bold text-neutral-950">
+                          {insp.name}
+                        </h2>
+                      </div>
+                      <p className="text-xs text-neutral-500 mt-1">
+                        Academic Year {insp.cycleId === '2026' ? '2026–27' : `Cycle ${insp.cycleId}`} · Region: {insp.region} · Current Stage: <span className="font-semibold text-neutral-900">{insp.stage.replace('_', ' ')}</span>
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setInspectingApplicantId(null)}
+                      className="p-1.5 rounded-xl border border-neutral-200 text-neutral-500 hover:text-neutral-950 hover:bg-neutral-50"
+                      aria-label="Close applicant details"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
+
+                  {/* Submission & Mock Verification Notice */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                    <div className="p-3 bg-neutral-50 rounded-xl border border-neutral-200">
+                      <span className="text-neutral-500 block">Identity Reference</span>
+                      <span className="font-mono font-semibold text-neutral-950">
+                        {insp.identityRef || inspAnswers.identityRef || 'MOCK-VERIFIED'}
+                      </span>
+                      <span className="text-[10px] text-neutral-400 block mt-0.5">
+                        [Prototype Mock ID]
+                      </span>
+                    </div>
+                    <div className="p-3 bg-neutral-50 rounded-xl border border-neutral-200">
+                      <span className="text-neutral-500 block">Submission Date</span>
+                      <span className="font-mono text-neutral-950">
+                        {insp.applicationSubmittedAt
+                          ? format(new Date(insp.applicationSubmittedAt), 'dd MMM yyyy, HH:mm')
+                          : 'Draft In Progress'}
+                      </span>
+                    </div>
+                    <div className="p-3 bg-neutral-50 rounded-xl border border-neutral-200">
+                      <span className="text-neutral-500 block">Phone & OTP Status</span>
+                      <span className="font-semibold text-emerald-800 flex items-center gap-1 mt-0.5">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                        <span>{insp.phone || inspAnswers.phone || 'Verified'}</span>
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Personal & Family Information */}
+                  <div className="space-y-2">
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-neutral-400">
+                      Personal & Household Background
+                    </h3>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs bg-neutral-50/50 p-4 rounded-xl border border-neutral-200">
+                      <div>
+                        <span className="text-neutral-500 block">Contact Email</span>
+                        <span className="font-medium text-neutral-950">{insp.email}</span>
+                      </div>
+                      <div>
+                        <span className="text-neutral-500 block">Gender</span>
+                        <span className="font-medium text-neutral-950">{inspAnswers.gender || '—'}</span>
+                      </div>
+                      <div>
+                        <span className="text-neutral-500 block">Date of Birth</span>
+                        <span className="font-medium text-neutral-950">{inspAnswers.dob || '—'}</span>
+                      </div>
+                      <div>
+                        <span className="text-neutral-500 block">Housing Status</span>
+                        <span className="font-medium text-neutral-950">{inspAnswers.housingType}</span>
+                      </div>
+                      <div>
+                        <span className="text-neutral-500 block">Father / Guardian</span>
+                        <span className="font-medium text-neutral-950">{inspAnswers.fatherName || '—'}</span>
+                      </div>
+                      <div>
+                        <span className="text-neutral-500 block">Mother / Guardian</span>
+                        <span className="font-medium text-neutral-950">{inspAnswers.motherName || '—'}</span>
+                      </div>
+                      <div>
+                        <span className="text-neutral-500 block">Parent Occupation</span>
+                        <span className="font-medium text-neutral-950">{inspAnswers.parentOccupation}</span>
+                      </div>
+                      <div>
+                        <span className="text-neutral-500 block">Family Members</span>
+                        <span className="font-medium text-neutral-950">{inspAnswers.familyMembersCount || '4'}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Educational & Financial Details */}
+                  <div className="space-y-2">
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-neutral-400">
+                      Academic Credentials & Financial Need
+                    </h3>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs bg-neutral-50/50 p-4 rounded-xl border border-neutral-200">
+                      <div>
+                        <span className="text-neutral-500 block">School Name & Type</span>
+                        <span className="font-medium text-neutral-950">
+                          {inspAnswers.schoolName || '—'} ({inspAnswers.schoolType})
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-neutral-500 block">10th Board Marks</span>
+                        <span className="font-mono font-bold text-neutral-950">{inspAnswers.tenthMarks || '—'}</span>
+                      </div>
+                      <div>
+                        <span className="text-neutral-500 block">12th Board Marks</span>
+                        <span className="font-mono font-bold text-neutral-950">{inspAnswers.twelfthMarks || '—'}</span>
+                      </div>
+                      <div>
+                        <span className="text-neutral-500 block">Medium of Instruction</span>
+                        <span className="font-medium text-neutral-950">{inspAnswers.mediumOfInstruction || 'Tamil'}</span>
+                      </div>
+                      <div>
+                        <span className="text-neutral-500 block">Stream</span>
+                        <span className="font-medium text-neutral-950">{inspAnswers.stream || 'Science'}</span>
+                      </div>
+                      <div>
+                        <span className="text-neutral-500 block">Family Annual Income</span>
+                        <span className="font-mono font-bold text-neutral-950">{inspAnswers.familyAnnualIncome}</span>
+                      </div>
+                    </div>
+
+                    {inspAnswers.whyMaatram && (
+                      <div className="p-3 bg-neutral-50 rounded-xl border border-neutral-200 text-xs">
+                        <span className="text-neutral-500 font-semibold block mb-1">Statement of Need (Why Maatram):</span>
+                        <p className="text-neutral-800">{inspAnswers.whyMaatram}</p>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Uploaded Verification Documents */}
+                  <div className="space-y-2">
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-neutral-400">
+                      Attached Verification Documents ({insp.documents.length})
+                    </h3>
+                    {insp.documents.length === 0 ? (
+                      <p className="text-xs text-neutral-400 italic py-1">
+                        No documents attached.
+                      </p>
+                    ) : (
+                      <ul className="divide-y divide-neutral-100 border border-neutral-200 rounded-xl overflow-hidden text-xs">
+                        {insp.documents.map((doc) => (
+                          <li key={doc.docId} className="p-3 flex items-center justify-between gap-3 hover:bg-neutral-50">
+                            <div className="flex items-center gap-2.5">
+                              <FileCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+                              <div>
+                                <span className="font-semibold text-neutral-950">{doc.label}</span>
+                                <span className="text-neutral-500 font-mono text-[11px] ml-2">
+                                  {doc.fileName}
+                                </span>
+                              </div>
+                            </div>
+                            <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 font-bold text-[10px]">
+                              Verified File
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+
+                  {/* Modal Footer Decisions */}
+                  <div className="flex items-center justify-between pt-4 border-t border-neutral-200">
+                    <span className="text-xs text-neutral-500">
+                      Assigned Verifiers: Tele: {insp.verifiers.teleVerifierName || 'Meera'} · Physical: {insp.verifiers.physicalVerifierName || 'Priya'}
+                    </span>
+                    <div className="flex items-center gap-2">
+                      {insp.stage !== 'selected' && insp.stage !== 'rejected' && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              handleSelectApplicant(insp.personId);
+                              setInspectingApplicantId(null);
+                            }}
+                            className="px-4 py-2 rounded-xl text-xs font-bold bg-neutral-950 text-white hover:bg-neutral-800"
+                          >
+                            Select Applicant
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setInspectingApplicantId(null);
+                              setRejectTargetId(insp.personId);
+                              setRejectReason('');
+                              setRejectError('');
+                            }}
+                            className="px-4 py-2 rounded-xl text-xs font-medium border border-neutral-950 text-neutral-950 bg-white hover:bg-neutral-50"
+                          >
+                            Reject
+                          </button>
+                        </>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setInspectingApplicantId(null)}
+                        className="px-4 py-2 rounded-xl text-xs font-semibold border border-neutral-300 text-neutral-700 hover:bg-neutral-100"
+                      >
+                        Close
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
         </div>
       )}
 

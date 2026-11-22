@@ -96,10 +96,30 @@ export const AppShell: React.FC<AppShellProps> = ({
     });
   };
 
-  const navItems = useMemo(
-    () => getSidebarItemsForRole(user.role),
-    [user.role]
-  );
+  const navItems = useMemo(() => {
+    const items = getSidebarItemsForRole(user.role);
+    if (user.role === 'applicant') {
+      try {
+        const raw = localStorage.getItem('maatram_submitted_applicants');
+        const list = raw ? JSON.parse(raw) : [];
+        const isSubmitted =
+          Array.isArray(list) &&
+          list.some(
+            (item: any) =>
+              item.personId === user.personId ||
+              (user.email &&
+                item.email &&
+                item.email.toLowerCase() === user.email.toLowerCase())
+          );
+        if (!isSubmitted) {
+          return items.filter((i) => i.id === 'form');
+        }
+      } catch {
+        // ignore
+      }
+    }
+    return items;
+  }, [user.role, user.personId, user.email]);
 
   // Group items by group label
   const groupedItems = useMemo(() => {

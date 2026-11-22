@@ -138,6 +138,19 @@ export interface ApplicationAnswers {
   familyAnnualIncome: string;
   housingType: 'Rented' | 'Own';
   whyMaatram: string;
+
+  // Single combined application workflow fields
+  phone?: string;
+  gender?: string;
+  dob?: string;
+  identityRef?: string;
+  fatherName?: string;
+  motherName?: string;
+  familyMembersCount?: string;
+  mediumOfInstruction?: string;
+  stream?: string;
+  incomeSource?: string;
+  eligibilityProofType?: 'school_fee_receipt' | 'govt_school_attendance' | 'employment_proof';
 }
 
 export interface StatusHistoryEntry {
@@ -209,6 +222,9 @@ export interface VerifierProgress {
 
 export interface PersonProfile {
   personId: string;
+  applicationCode?: string;
+  identityRef?: string;
+  otpVerified?: boolean;
   cycleId: string;
   name: string;
   email: string;

@@ -77,7 +77,6 @@ export function getSidebarItemsForRole(role: UserRole): SidebarNavItem[] {
       return [
         { id: 'application', path: '/applicant/application', label: 'Application', group: 'Application' },
         { id: 'form', path: '/applicant/form', label: 'Form', group: 'Application' },
-        { id: 'documents', path: '/applicant/documents', label: 'Documents', group: 'Application' },
         { id: 'history', path: '/applicant/history', label: 'Status history', group: 'Application' },
       ];
     case 'student':
@@ -185,6 +184,68 @@ export function verifyRoleCredentials(
   }
 
   const account = DEMO_ACCOUNTS[portalRole];
+
+  // For applicant portal, allow registered email + Application Code login from prototype submissions
+  if (portalRole === 'applicant') {
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        const stored = localStorage.getItem('maatram_submitted_applicants');
+        if (stored) {
+          const list = JSON.parse(stored);
+          const found = list.find(
+            (a: any) =>
+              a.email &&
+              a.email.toLowerCase() === email
+          );
+          if (
+            found &&
+            (password === account.password ||
+              password === 'Demo@123' ||
+              (found.applicationCode &&
+                password.trim().toUpperCase() ===
+                  found.applicationCode.trim().toUpperCase()))
+          ) {
+            return {
+              valid: true,
+              user: {
+                id: found.personId || `P-2026-${found.applicationCode.slice(-4)}`,
+                personId:
+                  found.personId || `P-2026-${found.applicationCode.slice(-4)}`,
+                role: 'applicant',
+                name: found.fullName || 'Registered Applicant',
+                email: found.email,
+                subtitle: `Application: ${found.applicationCode} · Verified`,
+              },
+            };
+          }
+        }
+      }
+    } catch {
+      // Fall through to standard check
+    }
+
+    // Demo applicant signs in with registered email & password (or application code)
+    if (
+      email === account.email.toLowerCase() &&
+      (password === account.password ||
+        password === 'Demo@123' ||
+        password.toUpperCase() === 'APP-2026-07' ||
+        password.toUpperCase() === 'P-2026-07')
+    ) {
+      return {
+        valid: true,
+        user: {
+          id: account.personId,
+          personId: account.personId,
+          role: account.role,
+          name: account.name,
+          email: account.email,
+          subtitle: account.subtitle,
+        },
+      };
+    }
+  }
+
   if (email !== account.email.toLowerCase()) {
     return {
       valid: false,
