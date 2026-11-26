@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { AlertCircle, X } from 'lucide-react';
+import { AlertCircle, CheckCircle2, X } from 'lucide-react';
 import {
   Navigate,
   Route,
@@ -15,6 +15,7 @@ import { ApplicantScreen, type ApplicantTab } from './components/ApplicantScreen
 import { LandingPage } from './components/LandingPage';
 import { LoginScreen } from './components/LoginScreen';
 import { ProfileScreen } from './components/ProfileScreen';
+import { RegisterScreen } from './components/RegisterScreen';
 import { StudentScreen, type StudentTab } from './components/StudentScreen';
 import {
   canAccessRoute,
@@ -26,6 +27,7 @@ import {
   type ApplicantScopedView,
   type StudentScopedView,
 } from './core/scoping';
+import { getApplicantApplicationState } from './core/applicantAuth';
 import { useMaatramStore } from './core/store';
 import type { AppState, AuthSessionUser, PersonProfile } from './core/types';
 
@@ -255,13 +257,26 @@ export default function App() {
   const handleLogin = (user: AuthSessionUser) => {
     setToastMessage('');
     loginUser(user);
-    navigate(getHomeRouteForRole(user.role));
+
+    // Conditional routing based on actual scholarship application submission status
+    if (user.role === 'applicant') {
+      const appState = getApplicantApplicationState(user.personId, user.email);
+      if (appState.hasSubmitted) {
+        // Case B: Applicant has already submitted application -> Route directly to Status Pipeline
+        navigate('/applicant/application');
+      } else {
+        // Case A: Applicant has NOT submitted application -> Route directly to Application Form
+        navigate('/applicant/form');
+      }
+    } else {
+      navigate(getHomeRouteForRole(user.role));
+    }
   };
 
   const handleStartPublicApplication = () => {
     setToastMessage('');
-    startPublicApplicationDraft();
-    navigate('/applicant/form');
+    // Direct navigation without premature unauthenticated session creation
+    navigate('/register');
   };
 
   const handleLogoutOrSwitch = () => {
@@ -271,21 +286,23 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-white text-neutral-950 flex flex-col font-sans">
-      {/* 3-Second Role Guard Toast */}
+      {/* Top Notification Toast with Tick Mark */}
       {toastMessage && (
         <div
           role="status"
-          className="fixed bottom-6 right-6 z-50 bg-neutral-950 text-white rounded-xl px-4 py-3 shadow-lg flex items-center gap-3 text-xs font-medium animate-fade-in"
+          className="fixed top-6 left-1/2 -translate-x-1/2 z-[100] bg-neutral-950 text-white border border-neutral-800 rounded-2xl px-5 py-3 shadow-2xl flex items-center gap-3 text-xs sm:text-sm font-medium animate-fade-in max-w-[90vw] sm:max-w-md pointer-events-auto"
         >
-          <AlertCircle className="w-4 h-4 text-[#FFC20E] shrink-0" aria-hidden="true" />
-          <span>{toastMessage}</span>
+          <div className="w-5 h-5 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
+            <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+          </div>
+          <span className="leading-snug flex-1">{toastMessage}</span>
           <button
             type="button"
             onClick={() => setToastMessage('')}
-            className="text-neutral-400 hover:text-white ml-1"
+            className="text-neutral-400 hover:text-white p-1 rounded-lg transition-colors shrink-0 cursor-pointer ml-1"
             aria-label="Dismiss notification"
           >
-            <X className="w-3.5 h-3.5" />
+            <X className="w-4 h-4" />
           </button>
         </div>
       )}
@@ -306,6 +323,10 @@ export default function App() {
         />
 
         {/* Login Hub and Sub-pages */}
+        <Route
+          path="/register"
+          element={<RegisterScreen />}
+        />
         <Route
           path="/login"
           element={

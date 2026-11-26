@@ -476,19 +476,23 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
 
   return (
     <div className="space-y-8">
-      {/* Toast Notification (Fades after 3 seconds) */}
+      {/* Toast Notification (Top Center with Tick Mark) */}
       {toastMsg && (
         <div
           role="status"
-          className="fixed bottom-6 right-6 z-50 bg-neutral-950 text-white rounded-xl px-4 py-3 text-sm flex items-center justify-between gap-4 shadow-lg animate-fade-in"
+          className="fixed top-6 left-1/2 -translate-x-1/2 z-[100] bg-neutral-950 text-white border border-neutral-800 rounded-2xl px-5 py-3 text-xs sm:text-sm flex items-center gap-3 shadow-2xl animate-fade-in max-w-[90vw] sm:max-w-md pointer-events-auto"
         >
-          <span>{toastMsg}</span>
+          <div className="w-5 h-5 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
+            <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+          </div>
+          <span className="leading-snug flex-1">{toastMsg}</span>
           <button
             type="button"
             onClick={() => setToastMsg('')}
-            className="text-xs font-semibold text-white/80 hover:text-white underline"
+            className="text-neutral-400 hover:text-white p-1 rounded-lg transition-colors shrink-0 cursor-pointer ml-1"
+            aria-label="Dismiss notification"
           >
-            Dismiss
+            <X className="w-4 h-4" />
           </button>
         </div>
       )}

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { format } from 'date-fns';
@@ -10,21 +10,29 @@ import {
   Clock,
   Copy,
   Edit3,
+  Eye,
   FileCheck,
+  FileCheck2,
   FileText,
   Info,
   KeyRound,
   Lock,
   Save,
   ShieldCheck,
-  Shuffle,
   Smartphone,
   Sparkles,
   Upload,
+  X,
 } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { DEFAULT_APPLICATION_ANSWERS } from '../core/reducer';
-import { generateRandomApplicantData } from '../core/demoGenerator';
+import {
+  createSafeDemoFile,
+  generateDemoEducationalDetails,
+  generateDemoFamilyDetails,
+  generateDemoFinancialDetails,
+  generateDemoPersonalDetails,
+} from '../core/demoGenerator';
 import type { ApplicantScopedView } from '../core/scoping';
 import { useMaatramStore, type AppendEventInput } from '../core/store';
 import {
@@ -37,6 +45,11 @@ import {
   formatBytes,
   validateUploadFile,
 } from '../core/validation';
+import {
+  saveDraftApplication,
+  submitApplicantApplication,
+  updateApplicantApplication,
+} from '../core/applicantAuth';
 
 export type ApplicantTab = 'application' | 'form' | 'history';
 
@@ -50,11 +63,11 @@ interface ApplicantScreenProps {
 }
 
 const STAGES: Array<{ id: LifecycleStage; label: string }> = [
-  { id: 'application', label: 'Application' },
-  { id: 'tele_verification', label: 'Tele-verification' },
-  { id: 'physical_verification', label: 'Physical verification' },
-  { id: 'panel_interview', label: 'Offline panel interview' },
-  { id: 'selected', label: 'Selected' },
+  { id: 'application', label: '1. Application Submitted' },
+  { id: 'tele_verification', label: '2. Tele-Verification' },
+  { id: 'physical_verification', label: '3. Physical Verification' },
+  { id: 'panel_interview', label: '4. Panel Review' },
+  { id: 'selected', label: '5. Final Selection / Result' },
 ];
 
 const ALL_DOC_OPTIONS = [
@@ -112,6 +125,10 @@ export const ApplicantScreen: React.FC<ApplicantScreenProps> = ({
     Boolean(activePerson?.otpVerified || activePerson?.applicationSubmittedAt)
   );
   const [otpError, setOtpError] = useState('');
+  const [otpExpired, setOtpExpired] = useState(false);
+  const [demoPipelineStage, setDemoPipelineStage] = useState<
+    'live' | 'applied' | 'tele_verification' | 'physical_verification' | 'selection_board' | 'selected' | 'rejected'
+  >('live');
 
   const navigate = useNavigate();
   const logoutUser = useMaatramStore((s) => s.logoutUser);
@@ -124,8 +141,13 @@ export const ApplicantScreen: React.FC<ApplicantScreenProps> = ({
   const [pendingAnswers, setPendingAnswers] = useState<ApplicationAnswers | null>(null);
   const [generatedCode, setGeneratedCode] = useState<string>('');
   const [copiedCode, setCopiedCode] = useState(false);
-  const [isGeneratingDemo, setIsGeneratingDemo] = useState(false);
   const [demoAppCode, setDemoAppCode] = useState<string>(activePerson?.applicationCode || '');
+  const [previewDoc, setPreviewDoc] = useState<{
+    label: string;
+    fileName: string;
+    fileSize?: number;
+    fileType?: string;
+  } | null>(null);
 
   const {
     register,
@@ -170,17 +192,22 @@ export const ApplicantScreen: React.FC<ApplicantScreenProps> = ({
 
   const isApplicationSubmitted = Boolean(activePerson?.applicationSubmittedAt);
 
+  const lastLoadedPersonIdRef = useRef<string | null>(null);
+
   useEffect(() => {
     if (activePerson) {
-      reset(activePerson.applicationAnswers);
-      setEmail(activePerson.email);
-      setRegion(
-        (DISTRICTS_8 as readonly string[]).includes(activePerson.region)
-          ? activePerson.region
-          : DISTRICTS_8[0]
-      );
-      if (activePerson.otpVerified || activePerson.applicationSubmittedAt) {
-        setOtpVerified(true);
+      if (lastLoadedPersonIdRef.current !== activePerson.personId) {
+        lastLoadedPersonIdRef.current = activePerson.personId;
+        reset(activePerson.applicationAnswers);
+        setEmail(activePerson.email);
+        setRegion(
+          (DISTRICTS_8 as readonly string[]).includes(activePerson.region)
+            ? activePerson.region
+            : DISTRICTS_8[0]
+        );
+        if (activePerson.otpVerified || activePerson.applicationSubmittedAt) {
+          setOtpVerified(true);
+        }
       }
     }
   }, [activePerson, reset]);
@@ -366,6 +393,13 @@ export const ApplicantScreen: React.FC<ApplicantScreenProps> = ({
       },
     });
 
+    // Save draft or update existing submission in applicantAuth storage
+    if (isApplicationSubmitted) {
+      updateApplicantApplication(targetPersonId, values, uploadedDocs);
+    } else {
+      saveDraftApplication(targetPersonId, email, values, uploadedDocs);
+    }
+
     // Also update prototype localStorage if submitted
     try {
       const raw = localStorage.getItem('maatram_submitted_applicants');
@@ -419,6 +453,20 @@ export const ApplicantScreen: React.FC<ApplicantScreenProps> = ({
       window.setTimeout(() => {
         setUploadProgress(pct);
         if (pct === 100) {
+          const currentAnswers = getValues();
+          onAppend({
+            type: 'APPLICATION_DRAFT_SAVED',
+            personId: targetPersonId,
+            cycleId: '2026',
+            actor: currentAnswers.fullName?.trim() || actorName,
+            payload: {
+              email,
+              region,
+              phone: currentAnswers.phone || '',
+              answers: currentAnswers,
+            },
+          });
+
           onAppend({
             type: 'DOCUMENT_UPLOADED',
             personId: targetPersonId,
@@ -459,12 +507,64 @@ export const ApplicantScreen: React.FC<ApplicantScreenProps> = ({
     e.target.value = '';
   };
 
-  const handleUploadSampleDoc = (labelToUse: string, defaultName: string) => {
+  const handleUploadSampleDoc = (
+    labelToUse: string,
+    defaultName: string,
+    mimeType = 'application/pdf',
+    description?: string
+  ) => {
+    const safeFile = createSafeDemoFile(
+      defaultName,
+      mimeType,
+      description || `DEMO FILE · ${labelToUse}`
+    );
     runSimulatedSignedUpload(labelToUse, {
-      name: defaultName,
-      type: 'application/pdf',
-      size: 245000 + Math.floor(Math.random() * 80000),
+      name: safeFile.name,
+      type: safeFile.type,
+      size: safeFile.size,
     });
+  };
+
+  const handleUseDemoPersonal = () => {
+    const data = generateDemoPersonalDetails();
+    setValue('fullName', data.fullName, { shouldValidate: true });
+    setValue('phone', data.phone, { shouldValidate: true });
+    setValue('gender', data.gender, { shouldValidate: true });
+    setValue('dob', data.dob, { shouldValidate: true });
+    setValue('identityRef', data.identityRef, { shouldValidate: true });
+    setEmail(data.email);
+    setRegion(data.region);
+    onUpdateSessionName(data.fullName);
+    showToast('Populated Section 1 (Personal Details) with demo data.');
+  };
+
+  const handleUseDemoFamily = () => {
+    const data = generateDemoFamilyDetails();
+    setValue('fatherName', data.fatherName, { shouldValidate: true });
+    setValue('motherName', data.motherName, { shouldValidate: true });
+    setValue('parentOccupation', data.parentOccupation, { shouldValidate: true });
+    setValue('familyMembersCount', data.familyMembersCount, { shouldValidate: true });
+    setValue('housingType', data.housingType as 'Rented' | 'Own', { shouldValidate: true });
+    showToast('Populated Section 2 (Family Details) with demo data.');
+  };
+
+  const handleUseDemoEducational = () => {
+    const data = generateDemoEducationalDetails(region);
+    setValue('schoolName', data.schoolName, { shouldValidate: true });
+    setValue('schoolType', data.schoolType as 'Government' | 'Private', { shouldValidate: true });
+    setValue('mediumOfInstruction', data.mediumOfInstruction, { shouldValidate: true });
+    setValue('stream', data.stream, { shouldValidate: true });
+    setValue('tenthMarks', data.tenthMarks, { shouldValidate: true });
+    setValue('twelfthMarks', data.twelfthMarks, { shouldValidate: true });
+    showToast('Populated Section 3 (Educational Details) with demo data.');
+  };
+
+  const handleUseDemoFinancial = () => {
+    const data = generateDemoFinancialDetails();
+    setValue('familyAnnualIncome', data.familyAnnualIncome, { shouldValidate: true });
+    setValue('incomeSource', data.incomeSource, { shouldValidate: true });
+    setValue('whyMaatram', data.whyMaatram, { shouldValidate: true });
+    showToast('Populated Section 4 (Financial Details) with demo data.');
   };
 
   const handleSendSimulatedOtp = () => {
@@ -475,13 +575,38 @@ export const ApplicantScreen: React.FC<ApplicantScreenProps> = ({
     const generated = String(Math.floor(100000 + Math.random() * 900000));
     setDemoOtpCode(generated);
     setOtpSent(true);
+    setOtpExpired(false);
     setEnteredOtp('');
     setOtpError('');
     showToast(`Simulated OTP sent to ${watchPhone}: ${generated}`);
   };
 
-  const handleVerifySimulatedOtp = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleTestValidOtp = () => {
+    setEnteredOtp(demoOtpCode || '842106');
+    setOtpExpired(false);
+    setOtpError('');
+    showToast(`Filled valid demo OTP (${demoOtpCode || '842106'}). Click Verify Code.`);
+  };
+
+  const handleTestIncorrectOtp = () => {
+    setEnteredOtp('000000');
+    setOtpExpired(false);
+    setOtpError('');
+    showToast('Filled incorrect OTP (000000) for error testing.');
+  };
+
+  const handleTestExpiredOtp = () => {
+    setOtpExpired(true);
+    setOtpError('The verification code has expired (simulated timeout). Please click Resend OTP.');
+    showToast('Simulated expired OTP condition.');
+  };
+
+  const handleVerifySimulatedOtp = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (otpExpired) {
+      setOtpError('The verification code has expired (simulated timeout). Please click Resend OTP.');
+      return;
+    }
     if (!enteredOtp.trim()) {
       setOtpError('Please enter the 6-digit OTP.');
       return;
@@ -493,55 +618,6 @@ export const ApplicantScreen: React.FC<ApplicantScreenProps> = ({
     } else {
       setOtpError(`Invalid OTP. Use demo verification code: ${demoOtpCode}`);
     }
-  };
-
-  const handleEasyFillDemoData = () => {
-    setIsGeneratingDemo(true);
-    const demo = generateRandomApplicantData();
-
-    // Store generated demo application code
-    setDemoAppCode(demo.applicationCode);
-
-    // 1. Populate form answers with randomized demographic and academic data
-    reset(demo.answers);
-
-    // 2. Set contact and district info
-    setEmail(demo.email);
-    setRegion(demo.region);
-
-    // 3. Update session display name
-    onUpdateSessionName(demo.answers.fullName);
-
-    // 4. Attach sample required documents matching the applicant's profile
-    demo.documents.forEach((doc, idx) => {
-      onAppend({
-        type: 'DOCUMENT_UPLOADED',
-        personId: targetPersonId,
-        cycleId: '2026',
-        actor: demo.answers.fullName,
-        payload: {
-          docId: `DOC-DEMO-${idx + 1}-${Date.now().toString(36).toUpperCase()}-${Math.floor(100 + Math.random() * 900)}`,
-          label: doc.label,
-          fileName: doc.fileName,
-          fileType: doc.fileType,
-          fileSize: doc.size,
-          signedUrl: `https://signed.maatram.local/docs/${encodeURIComponent(doc.fileName)}`,
-        },
-      });
-    });
-
-    // 5. Complete simulated OTP verification immediately
-    setDemoOtpCode(demo.otp);
-    setEnteredOtp(demo.otp);
-    setOtpSent(true);
-    setOtpVerified(true);
-    setOtpError('');
-
-    setTimeout(() => setIsGeneratingDemo(false), 300);
-
-    showToast(
-      `Generated demo applicant: ${demo.answers.fullName} (${demo.applicationCode}) - All fields filled!`
-    );
   };
 
   const onValidSubmit = (values: ApplicationAnswers) => {
@@ -570,10 +646,46 @@ export const ApplicantScreen: React.FC<ApplicantScreenProps> = ({
       onUpdateSessionName(values.fullName.trim());
     }
 
-    // Save answers in state; after submitting, a "Generate a code" button appears
-    setPendingAnswers(values);
-    setSubmissionStage('submitted_awaiting_code');
-    showToast('Application submitted. Now click "Generate a code".');
+    // Preserve the existing MAA Application Code generated at registration
+    const appCode =
+      activePerson.applicationCode ||
+      demoAppCode ||
+      `MAA-2026-${Math.floor(1000 + Math.random() * 9000)}`;
+    const verifiedIdentityRef = values.identityRef?.trim() || `MOCK-${targetPersonId}`;
+
+    // Record submission in applicantAuth storage
+    submitApplicantApplication(
+      targetPersonId,
+      appCode,
+      verifiedIdentityRef,
+      email,
+      values.phone || '',
+      values.fullName.trim(),
+      values,
+      uploadedDocs
+    );
+
+    // Append event to reducer
+    onAppend({
+      type: 'APPLICATION_SUBMITTED',
+      personId: targetPersonId,
+      cycleId: '2026',
+      actor,
+      payload: {
+        email,
+        region,
+        phone: values.phone || '',
+        applicationCode: appCode,
+        identityRef: verifiedIdentityRef,
+        answers: {
+          ...values,
+          identityRef: verifiedIdentityRef,
+        },
+      },
+    });
+
+    showToast('Scholarship application submitted successfully!');
+    navigate('/applicant/application');
   };
 
   const handleGenerateCode = () => {
@@ -646,7 +758,8 @@ export const ApplicantScreen: React.FC<ApplicantScreenProps> = ({
     }
   };
 
-  const currentStageIndex = STAGES.findIndex((s) => s.id === activePerson.stage);
+  const effectiveStage = demoPipelineStage === 'live' ? activePerson.stage : demoPipelineStage;
+  const currentStageIndex = STAGES.findIndex((s) => s.id === effectiveStage);
 
   return (
     <div className="space-y-8">
@@ -663,9 +776,9 @@ export const ApplicantScreen: React.FC<ApplicantScreenProps> = ({
                     ? 'Application Status'
                     : 'Pipeline Status History'}
             </h1>
-            {(activePerson.applicationCode || demoAppCode) && (
+            {isApplicationSubmitted && activePerson.applicationCode && (
               <span className="bg-neutral-950 text-white rounded-full px-3 py-0.5 text-xs font-mono font-bold tracking-tight">
-                {activePerson.applicationCode || demoAppCode}
+                {activePerson.applicationCode}
               </span>
             )}
           </div>
@@ -809,12 +922,26 @@ export const ApplicantScreen: React.FC<ApplicantScreenProps> = ({
                       Academic Cycle 2026–27 · Identity Ref: <span className="font-mono text-neutral-200">{activePerson.identityRef || 'MOCK-VERIFIED'}</span>
                     </p>
                   </div>
-                  <div className="flex items-center gap-2 self-start sm:self-auto">
+                  <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
                     <span className="bg-white/10 text-neutral-200 border border-white/20 rounded-full px-3 py-1 text-xs font-semibold">
                       {activePerson.applicationSubmittedAt
                         ? `Submitted: ${format(new Date(activePerson.applicationSubmittedAt), 'dd MMM yyyy')}`
                         : 'Draft in Progress'}
                     </span>
+                    <button
+                      type="button"
+                      onClick={() => navigate('/profile')}
+                      className="px-3 py-1 rounded-full text-xs font-semibold bg-white/20 text-white hover:bg-white/30 transition-colors cursor-pointer"
+                    >
+                      View Profile
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => navigate('/applicant/form')}
+                      className="px-3 py-1 rounded-full text-xs font-bold bg-[#FFC20E] text-neutral-950 hover:bg-[#e5ae0b] transition-colors cursor-pointer"
+                    >
+                      Edit Application
+                    </button>
                   </div>
                 </div>
               ) : (
@@ -831,19 +958,163 @@ export const ApplicantScreen: React.FC<ApplicantScreenProps> = ({
               )}
 
               <section className="bg-white border border-neutral-200 rounded-2xl p-6 sm:p-8 space-y-6 shadow-xs">
+                {/* Pipeline Demo Scenario Tester */}
+                <div className="bg-amber-50/80 border border-amber-300 rounded-xl p-4 space-y-2.5">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <Sparkles className="w-4 h-4 text-amber-700 shrink-0" />
+                      <span className="text-xs font-bold text-amber-950 uppercase tracking-wide">
+                        Selection Pipeline Demo Scenario Tester
+                      </span>
+                      {demoPipelineStage !== 'live' && (
+                        <span className="bg-amber-200 text-amber-950 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border border-amber-400">
+                          DEMO STATUS
+                        </span>
+                      )}
+                    </div>
+                    {demoPipelineStage !== 'live' && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDemoPipelineStage('live');
+                          showToast('Reset to live application pipeline status.');
+                        }}
+                        className="text-xs font-bold text-neutral-800 underline hover:text-neutral-950 cursor-pointer self-start sm:self-auto"
+                      >
+                        Reset to Live Status
+                      </button>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-amber-900 leading-relaxed">
+                    Test applicant progression across official selection stages. Generated demo stages are simulated for prototype verification and do not modify actual applicant selection records or decisions.
+                  </p>
+                  <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDemoPipelineStage('live');
+                        showToast('Showing Live Status.');
+                      }}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors cursor-pointer border ${
+                        demoPipelineStage === 'live'
+                          ? 'bg-neutral-950 text-white border-neutral-950'
+                          : 'bg-white text-neutral-800 border-neutral-300 hover:bg-neutral-100'
+                      }`}
+                    >
+                      Live Status
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDemoPipelineStage('applied');
+                        showToast('Simulated Stage 1: Applied (Demo).');
+                      }}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors cursor-pointer border ${
+                        demoPipelineStage === 'applied'
+                          ? 'bg-[#FFC20E] text-neutral-950 border-amber-500 font-bold'
+                          : 'bg-white text-neutral-800 border-neutral-300 hover:bg-neutral-100'
+                      }`}
+                    >
+                      1. Applied
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDemoPipelineStage('tele_verification');
+                        showToast('Simulated Stage 2: Tele-Verification (Demo).');
+                      }}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors cursor-pointer border ${
+                        demoPipelineStage === 'tele_verification'
+                          ? 'bg-[#FFC20E] text-neutral-950 border-amber-500 font-bold'
+                          : 'bg-white text-neutral-800 border-neutral-300 hover:bg-neutral-100'
+                      }`}
+                    >
+                      2. Tele-Verification
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDemoPipelineStage('physical_verification');
+                        showToast('Simulated Stage 3: Physical Verification (Demo).');
+                      }}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors cursor-pointer border ${
+                        demoPipelineStage === 'physical_verification'
+                          ? 'bg-[#FFC20E] text-neutral-950 border-amber-500 font-bold'
+                          : 'bg-white text-neutral-800 border-neutral-300 hover:bg-neutral-100'
+                      }`}
+                    >
+                      3. Physical Verification
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDemoPipelineStage('selection_board');
+                        showToast('Simulated Stage 4: Selection Board (Demo).');
+                      }}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors cursor-pointer border ${
+                        demoPipelineStage === 'selection_board'
+                          ? 'bg-[#FFC20E] text-neutral-950 border-amber-500 font-bold'
+                          : 'bg-white text-neutral-800 border-neutral-300 hover:bg-neutral-100'
+                      }`}
+                    >
+                      4. Selection Board
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDemoPipelineStage('selected');
+                        showToast('Simulated Stage 5: Selected Scholar (Demo).');
+                      }}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors cursor-pointer border ${
+                        demoPipelineStage === 'selected'
+                          ? 'bg-emerald-600 text-white border-emerald-700 font-bold'
+                          : 'bg-white text-neutral-800 border-neutral-300 hover:bg-neutral-100'
+                      }`}
+                    >
+                      5. Selected
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDemoPipelineStage('rejected');
+                        showToast('Simulated Stage: Not Selected / Rejected (Demo).');
+                      }}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors cursor-pointer border ${
+                        demoPipelineStage === 'rejected'
+                          ? 'bg-red-600 text-white border-red-700 font-bold'
+                          : 'bg-white text-neutral-800 border-neutral-300 hover:bg-neutral-100'
+                      }`}
+                    >
+                      Not Selected
+                    </button>
+                  </div>
+                </div>
+
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-neutral-100 pb-4">
                   <div>
-                    <h2 className="font-display text-lg font-bold text-neutral-950">
-                      Selection Pipeline
-                    </h2>
+                    <div className="flex items-center gap-2">
+                      <h2 className="font-display text-lg font-bold text-neutral-950">
+                        Selection Pipeline
+                      </h2>
+                      {demoPipelineStage !== 'live' && (
+                        <span className="bg-amber-100 text-amber-900 border border-amber-300 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider">
+                          DEMO STATUS
+                        </span>
+                      )}
+                    </div>
                     <p className="text-xs text-neutral-500">
                       Current stage:{' '}
                       <span className="font-semibold text-neutral-950">
-                        {activePerson.stage === 'rejected'
-                          ? 'Rejected'
-                          : STAGES[currentStageIndex]?.label || activePerson.stage}
+                        {effectiveStage === 'rejected'
+                          ? 'Not Selected (Rejected)'
+                          : STAGES[currentStageIndex]?.label || effectiveStage}
                       </span>
                       {activePerson.shortlisted && ' · Shortlisted'}
+                      {demoPipelineStage !== 'live' && (
+                        <span className="text-amber-700 font-medium ml-1">
+                          (Simulated Demo Scenario)
+                        </span>
+                      )}
                     </p>
                   </div>
 
@@ -855,15 +1126,22 @@ export const ApplicantScreen: React.FC<ApplicantScreenProps> = ({
                   )}
                 </div>
 
-                {activePerson.stage === 'rejected' ? (
+                {effectiveStage === 'rejected' ? (
                   <div
                     role="alert"
                     className="p-4 rounded-xl border border-red-300 bg-red-50 text-red-950 text-sm space-y-1"
                   >
-                    <p className="font-bold">Application Not Selected (Admin Decision)</p>
+                    <div className="flex items-center justify-between">
+                      <p className="font-bold">Application Not Selected (Admin Decision)</p>
+                      {demoPipelineStage !== 'live' && (
+                        <span className="text-[10px] font-bold uppercase tracking-wider bg-red-200 text-red-900 border border-red-300 px-2 py-0.5 rounded">
+                          DEMO STATUS
+                        </span>
+                      )}
+                    </div>
                     <p>
                       <span className="font-semibold">Rejection reason: </span>
-                      {activePerson.rejectionReason || 'Not specified'}
+                      {activePerson.rejectionReason || 'Family income exceeds eligible scholarship threshold (Simulated Demo Decision)'}
                     </p>
                   </div>
                 ) : (
@@ -953,7 +1231,7 @@ export const ApplicantScreen: React.FC<ApplicantScreenProps> = ({
                 </div>
 
                 {/* Join Code Banner on Selection */}
-                {activePerson.stage === 'selected' && activePerson.joinCode && (
+                {effectiveStage === 'selected' && (activePerson.joinCode || demoPipelineStage === 'selected') && (
                   <div className="border border-neutral-950 bg-neutral-950 text-white rounded-xl p-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                     <div className="space-y-1">
                       <div className="flex items-center gap-2">
@@ -961,9 +1239,14 @@ export const ApplicantScreen: React.FC<ApplicantScreenProps> = ({
                         <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-neutral-300">
                           Workspace Join Code (Valid 48 hours)
                         </span>
+                        {demoPipelineStage !== 'live' && (
+                          <span className="text-[10px] font-bold uppercase tracking-wider bg-amber-400 text-neutral-950 px-2 py-0.5 rounded">
+                            DEMO CODE
+                          </span>
+                        )}
                       </div>
                       <p className="text-2xl font-bold tracking-[0.08em] tabular-nums text-white">
-                        {activePerson.joinCode}
+                        {activePerson.joinCode || 'MAATRAM-JOIN-2026-DEMO'}
                       </p>
                       <p className="text-xs text-neutral-300 font-semibold tabular-nums pt-1">
                         Valid until:{' '}
@@ -1277,14 +1560,23 @@ export const ApplicantScreen: React.FC<ApplicantScreenProps> = ({
                       </p>
                     </div>
                   </div>
-                  <button
-                    type="button"
-                    onClick={handleSaveDraft}
-                    className="px-5 py-2.5 rounded-xl font-bold text-xs bg-[#FFC20E] text-neutral-950 hover:bg-[#e5ae0b] transition-colors shadow-xs flex items-center justify-center gap-2 whitespace-nowrap self-start sm:self-auto shrink-0"
-                  >
-                    <Save className="w-3.5 h-3.5" />
-                    <span>Save Changes</span>
-                  </button>
+                  <div className="flex items-center gap-2 self-start sm:self-auto shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => navigate('/applicant/application')}
+                      className="px-4 py-2.5 rounded-xl font-semibold text-xs bg-neutral-800 text-white hover:bg-neutral-700 transition-colors whitespace-nowrap cursor-pointer"
+                    >
+                      Status Pipeline
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleSaveDraft}
+                      className="px-5 py-2.5 rounded-xl font-bold text-xs bg-[#FFC20E] text-neutral-950 hover:bg-[#e5ae0b] transition-colors shadow-xs flex items-center justify-center gap-2 whitespace-nowrap cursor-pointer"
+                    >
+                      <Save className="w-3.5 h-3.5" />
+                      <span>Save Changes</span>
+                    </button>
+                  </div>
                 </div>
               )}
 
@@ -1301,43 +1593,6 @@ export const ApplicantScreen: React.FC<ApplicantScreenProps> = ({
                   <p className="text-red-800">
                     Please change the identity reference/email or sign in with your existing Application Code.
                   </p>
-                </div>
-              )}
-
-              {/* Generate Demo Application Card */}
-              {submissionStage === 'idle' && (
-                <div className="bg-amber-50/90 border-2 border-dashed border-amber-300 rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xs">
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-[#FFC20E] text-neutral-950 uppercase tracking-wider">
-                        <Sparkles className="w-3.5 h-3.5 text-neutral-950" />
-                        Demo Generator
-                      </span>
-                      <span className="text-xs font-bold text-amber-950">
-                        One-Click Demo Application Generator
-                      </span>
-                    </div>
-                    <p className="text-xs text-amber-900 leading-relaxed">
-                      Generate realistic random dummy data for all personal, family, educational, and financial fields with safe sample document proofs and simulated OTP. Every click generates a fresh applicant profile.
-                    </p>
-                    {demoAppCode && (
-                      <div className="flex items-center gap-2 pt-1 text-xs">
-                        <span className="font-semibold text-neutral-700">Application Code:</span>
-                        <span className="bg-neutral-950 text-white font-mono font-bold px-2.5 py-0.5 rounded-full text-xs">
-                          {demoAppCode}
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={handleEasyFillDemoData}
-                    disabled={isGeneratingDemo}
-                    className="px-5 py-2.5 rounded-xl font-bold text-xs bg-neutral-950 text-white hover:bg-neutral-800 active:scale-95 shadow-xs flex items-center justify-center gap-2 whitespace-nowrap self-start sm:self-auto transition-all shrink-0 cursor-pointer disabled:opacity-50"
-                  >
-                    <Shuffle className={`w-4 h-4 text-[#FFC20E] ${isGeneratingDemo ? 'animate-spin' : ''}`} />
-                    <span>Generate Demo Application</span>
-                  </button>
                 </div>
               )}
 
@@ -1404,822 +1659,1328 @@ export const ApplicantScreen: React.FC<ApplicantScreenProps> = ({
                         Applicant identity and contact information.
                       </p>
                     </div>
-                    {hasPersonalDetails && (
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={handleUseDemoPersonal}
+                        className="px-2.5 py-1 rounded-lg text-xs font-semibold border border-neutral-300 bg-white hover:bg-neutral-50 text-neutral-800 flex items-center gap-1.5 transition-colors shadow-2xs"
+                      >
+                        <Sparkles className="w-3.5 h-3.5 text-[#FFC20E]" />
+                        <span>Use Demo Data</span>
+                      </button>
+                      {hasPersonalDetails && (
+                        <span className="text-xs font-semibold text-emerald-700 flex items-center gap-1">
+                          <Check className="w-3.5 h-3.5" /> Validated
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label htmlFor="q1-name" className="block text-xs font-semibold text-neutral-800 mb-1">
+                        Full Name *
+                      </label>
+                      <input
+                        id="q1-name"
+                        type="text"
+                        {...register('fullName')}
+                        placeholder="e.g. Senthil Kumar S"
+                        className="w-full border border-neutral-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-neutral-950"
+                      />
+                      {errors.fullName && (
+                        <p className="text-xs text-red-600 mt-1">{errors.fullName.message}</p>
+                      )}
+                    </div>
+
+                    <div>
+                      <label htmlFor="q1-email" className="block text-xs font-semibold text-neutral-800 mb-1">
+                        Email Address *
+                      </label>
+                      <input
+                        id="q1-email"
+                        type="email"
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        placeholder="e.g. senthil.s@demo.local"
+                        className="w-full border border-neutral-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-neutral-950"
+                      />
+                    </div>
+
+                    <div>
+                      <label htmlFor="q1-phone" className="block text-xs font-semibold text-neutral-800 mb-1">
+                        Mobile Phone Number *
+                      </label>
+                      <input
+                        id="q1-phone"
+                        type="tel"
+                        {...register('phone')}
+                        placeholder="e.g. 9840123456"
+                        className="w-full border border-neutral-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-neutral-950"
+                      />
+                    </div>
+
+                    <div>
+                      <label htmlFor="q1-gender" className="block text-xs font-semibold text-neutral-800 mb-1">
+                        Gender *
+                      </label>
+                      <select
+                        id="q1-gender"
+                        {...register('gender')}
+                        className="w-full border border-neutral-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-neutral-950"
+                      >
+                        <option value="">Select gender</option>
+                        <option value="Male">Male</option>
+                        <option value="Female">Female</option>
+                        <option value="Other">Other</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label htmlFor="q1-dob" className="block text-xs font-semibold text-neutral-800 mb-1">
+                        Date of Birth *
+                      </label>
+                      <input
+                        id="q1-dob"
+                        type="date"
+                        {...register('dob')}
+                        className="w-full border border-neutral-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-neutral-950"
+                      />
+                    </div>
+
+                    <div>
+                      <label htmlFor="q1-region" className="block text-xs font-semibold text-neutral-800 mb-1">
+                        District (Tamil Nadu) *
+                      </label>
+                      <select
+                        id="q1-region"
+                        value={region}
+                        onChange={(e) => setRegion(e.target.value)}
+                        className="w-full border border-neutral-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-neutral-950"
+                      >
+                        {DISTRICTS_8.map((d) => (
+                          <option key={d} value={d}>
+                            {d}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="sm:col-span-2">
+                      <label htmlFor="q1-identity" className="block text-xs font-semibold text-neutral-800 mb-1">
+                        Identity / Registration Reference *
+                      </label>
+                      <input
+                        id="q1-identity"
+                        type="text"
+                        {...register('identityRef')}
+                        placeholder="e.g. MOCK-TN-2026-9812"
+                        className="w-full border border-neutral-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-neutral-950"
+                      />
+                      <p className="text-[11px] text-neutral-500 mt-1">
+                        Mock identity reference number for verification without storing sensitive government IDs.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* SECTION 2: Family Details */}
+                <div className="space-y-4">
+                  <div className="border-b border-neutral-200 pb-2 flex items-center justify-between">
+                    <div>
+                      <h3 className="font-display text-base font-bold text-neutral-950">
+                        2. Family Details
+                      </h3>
+                      <p className="text-xs text-neutral-500">
+                        Household structure, parent background, and housing type.
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={handleUseDemoFamily}
+                        className="px-2.5 py-1 rounded-lg text-xs font-semibold border border-neutral-300 bg-white hover:bg-neutral-50 text-neutral-800 flex items-center gap-1.5 transition-colors shadow-2xs"
+                      >
+                        <Sparkles className="w-3.5 h-3.5 text-[#FFC20E]" />
+                        <span>Use Demo Data</span>
+                      </button>
+                      {hasFamilyDetails && (
+                        <span className="text-xs font-semibold text-emerald-700 flex items-center gap-1">
+                          <Check className="w-3.5 h-3.5" /> Validated
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label htmlFor="q2-father" className="block text-xs font-semibold text-neutral-800 mb-1">
+                        Father's / Guardian's Name *
+                      </label>
+                      <input
+                        id="q2-father"
+                        type="text"
+                        {...register('fatherName')}
+                        placeholder="e.g. Rajendran M"
+                        className="w-full border border-neutral-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-neutral-950"
+                      />
+                    </div>
+
+                    <div>
+                      <label htmlFor="q2-mother" className="block text-xs font-semibold text-neutral-800 mb-1">
+                        Mother's / Guardian's Name *
+                      </label>
+                      <input
+                        id="q2-mother"
+                        type="text"
+                        {...register('motherName')}
+                        placeholder="e.g. Kamala R"
+                        className="w-full border border-neutral-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-neutral-950"
+                      />
+                    </div>
+
+                    <div>
+                      <label htmlFor="q4-occupation" className="block text-xs font-semibold text-neutral-800 mb-1">
+                        Parent / Guardian Occupation *
+                      </label>
+                      <input
+                        id="q4-occupation"
+                        type="text"
+                        {...register('parentOccupation')}
+                        placeholder="e.g. Daily wage tailor"
+                        className="w-full border border-neutral-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-neutral-950"
+                      />
+                      {errors.parentOccupation && (
+                        <p className="text-xs text-red-600 mt-1">{errors.parentOccupation.message}</p>
+                      )}
+                    </div>
+
+                    <div>
+                      <label htmlFor="q2-members" className="block text-xs font-semibold text-neutral-800 mb-1">
+                        Number of Family Members *
+                      </label>
+                      <input
+                        id="q2-members"
+                        type="text"
+                        {...register('familyMembersCount')}
+                        placeholder="e.g. 4"
+                        className="w-full border border-neutral-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-neutral-950"
+                      />
+                    </div>
+
+                    <div className="sm:col-span-2">
+                      <label htmlFor="q6-housing" className="block text-xs font-semibold text-neutral-800 mb-1">
+                        Housing Status *
+                      </label>
+                      <select
+                        id="q6-housing"
+                        {...register('housingType')}
+                        className="w-full border border-neutral-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-neutral-950"
+                      >
+                        <option value="Rented">Rented (House rent receipt upload required)</option>
+                        <option value="Own">Own (House tax / residential proof upload required)</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+
+                {/* SECTION 3: Educational Details */}
+                <div className="space-y-4">
+                  <div className="border-b border-neutral-200 pb-2 flex items-center justify-between">
+                    <div>
+                      <h3 className="font-display text-base font-bold text-neutral-950">
+                        3. Educational Details
+                      </h3>
+                      <p className="text-xs text-neutral-500">
+                        Schooling history and board examination scores.
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={handleUseDemoEducational}
+                        className="px-2.5 py-1 rounded-lg text-xs font-semibold border border-neutral-300 bg-white hover:bg-neutral-50 text-neutral-800 flex items-center gap-1.5 transition-colors shadow-2xs"
+                      >
+                        <Sparkles className="w-3.5 h-3.5 text-[#FFC20E]" />
+                        <span>Use Demo Data</span>
+                      </button>
+                      {hasEducationalDetails && (
+                        <span className="text-xs font-semibold text-emerald-700 flex items-center gap-1">
+                          <Check className="w-3.5 h-3.5" /> Validated
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label htmlFor="q1-school" className="block text-xs font-semibold text-neutral-800 mb-1">
+                        School Name *
+                      </label>
+                      <input
+                        id="q1-school"
+                        type="text"
+                        {...register('schoolName')}
+                        placeholder="e.g. Govt Higher Secondary School, Saidapet"
+                        className="w-full border border-neutral-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-neutral-950"
+                      />
+                      {errors.schoolName && (
+                        <p className="text-xs text-red-600 mt-1">{errors.schoolName.message}</p>
+                      )}
+                    </div>
+
+                    <div>
+                      <label htmlFor="q2-school-type" className="block text-xs font-semibold text-neutral-800 mb-1">
+                        School Type *
+                      </label>
+                      <select
+                        id="q2-school-type"
+                        {...register('schoolType')}
+                        className="w-full border border-neutral-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-neutral-950"
+                      >
+                        <option value="Government">Government School</option>
+                        <option value="Private">Private School</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label htmlFor="q3-medium" className="block text-xs font-semibold text-neutral-800 mb-1">
+                        Medium of Instruction *
+                      </label>
+                      <select
+                        id="q3-medium"
+                        {...register('mediumOfInstruction')}
+                        className="w-full border border-neutral-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-neutral-950"
+                      >
+                        <option value="Tamil">Tamil</option>
+                        <option value="English">English</option>
+                        <option value="Other">Other</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label htmlFor="q3-stream" className="block text-xs font-semibold text-neutral-800 mb-1">
+                        12th Stream / Major *
+                      </label>
+                      <input
+                        id="q3-stream"
+                        type="text"
+                        {...register('stream')}
+                        placeholder="e.g. Computer Science / Maths"
+                        className="w-full border border-neutral-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-neutral-950"
+                      />
+                    </div>
+
+                    <div>
+                      <label htmlFor="q3-tenth" className="block text-xs font-semibold text-neutral-800 mb-1">
+                        10th Board Marks *
+                      </label>
+                      <input
+                        id="q3-tenth"
+                        type="text"
+                        {...register('tenthMarks')}
+                        placeholder="e.g. 464 / 500 (92.8%)"
+                        className="w-full border border-neutral-300 rounded-lg px-3 py-2 text-sm font-mono tabular-nums focus:outline-none focus:ring-2 focus:ring-neutral-950"
+                      />
+                      {errors.tenthMarks && (
+                        <p className="text-xs text-red-600 mt-1">{errors.tenthMarks.message}</p>
+                      )}
+                    </div>
+
+                    <div>
+                      <label htmlFor="q3-twelfth" className="block text-xs font-semibold text-neutral-800 mb-1">
+                        12th Board Marks *
+                      </label>
+                      <input
+                        id="q3-twelfth"
+                        type="text"
+                        {...register('twelfthMarks')}
+                        placeholder="e.g. 552 / 600 (92.0%)"
+                        className="w-full border border-neutral-300 rounded-lg px-3 py-2 text-sm font-mono tabular-nums focus:outline-none focus:ring-2 focus:ring-neutral-950"
+                      />
+                      {errors.twelfthMarks && (
+                        <p className="text-xs text-red-600 mt-1">{errors.twelfthMarks.message}</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* SECTION 4: Financial Details */}
+                <div className="space-y-4">
+                  <div className="border-b border-neutral-200 pb-2 flex items-center justify-between">
+                    <div>
+                      <h3 className="font-display text-base font-bold text-neutral-950">
+                        4. Financial Details
+                      </h3>
+                      <p className="text-xs text-neutral-500">
+                        Annual household income and need statement.
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={handleUseDemoFinancial}
+                        className="px-2.5 py-1 rounded-lg text-xs font-semibold border border-neutral-300 bg-white hover:bg-neutral-50 text-neutral-800 flex items-center gap-1.5 transition-colors shadow-2xs"
+                      >
+                        <Sparkles className="w-3.5 h-3.5 text-[#FFC20E]" />
+                        <span>Use Demo Data</span>
+                      </button>
+                      {hasFinancialDetails && (
+                        <span className="text-xs font-semibold text-emerald-700 flex items-center gap-1">
+                          <Check className="w-3.5 h-3.5" /> Validated
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label htmlFor="q5-income" className="block text-xs font-semibold text-neutral-800 mb-1">
+                        Family Annual Income *
+                      </label>
+                      <input
+                        id="q5-income"
+                        type="text"
+                        {...register('familyAnnualIncome')}
+                        placeholder="e.g. Rs 95,000"
+                        className="w-full border border-neutral-300 rounded-lg px-3 py-2 text-sm font-mono tabular-nums focus:outline-none focus:ring-2 focus:ring-neutral-950"
+                      />
+                      {errors.familyAnnualIncome && (
+                        <p className="text-xs text-red-600 mt-1">{errors.familyAnnualIncome.message}</p>
+                      )}
+                    </div>
+
+                    <div>
+                      <label htmlFor="q5-source" className="block text-xs font-semibold text-neutral-800 mb-1">
+                        Primary Income Source *
+                      </label>
+                      <input
+                        id="q5-source"
+                        type="text"
+                        {...register('incomeSource')}
+                        placeholder="e.g. Daily wage tailoring / Agricultural labour"
+                        className="w-full border border-neutral-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-neutral-950"
+                      />
+                    </div>
+
+                    <div className="sm:col-span-2">
+                      <label htmlFor="q7-why" className="block text-xs font-semibold text-neutral-800 mb-1">
+                        Statement of Need: Why Maatram? *
+                      </label>
+                      <textarea
+                        id="q7-why"
+                        rows={3}
+                        {...register('whyMaatram')}
+                        placeholder="Explain your household challenges and how Maatram One scholarship and mentorship will enable your higher education..."
+                        className="w-full border border-neutral-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-neutral-950"
+                      />
+                      {errors.whyMaatram && (
+                        <p className="text-xs text-red-600 mt-1">{errors.whyMaatram.message}</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* SECTION 5: Document Uploads (Completed in the same process!) */}
+                <div className="space-y-4">
+                  <div className="border-b border-neutral-200 pb-2 flex items-center justify-between">
+                    <div>
+                      <h3 className="font-display text-base font-bold text-neutral-950">
+                        5. Supporting Documents Upload
+                      </h3>
+                      <p className="text-xs text-neutral-500">
+                        All 6 supporting document requirements can be uploaded or filled using demo files.
+                      </p>
+                    </div>
+                    {hasAllRequiredDocs && (
                       <span className="text-xs font-semibold text-emerald-700 flex items-center gap-1">
-                        <Check className="w-3.5 h-3.5" /> Validated
+                        <Check className="w-3.5 h-3.5" /> All Uploaded
                       </span>
                     )}
                   </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label htmlFor="q2-father" className="block text-xs font-semibold text-neutral-800 mb-1">
-                  Father's / Guardian's Name *
-                </label>
-                <input
-                  id="q2-father"
-                  type="text"
-                  {...register('fatherName')}
-                  placeholder="e.g. Rajendran M"
-                  className="w-full border border-neutral-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-neutral-950"
-                />
-              </div>
-
-              <div>
-                <label htmlFor="q2-mother" className="block text-xs font-semibold text-neutral-800 mb-1">
-                  Mother's / Guardian's Name *
-                </label>
-                <input
-                  id="q2-mother"
-                  type="text"
-                  {...register('motherName')}
-                  placeholder="e.g. Kamala R"
-                  className="w-full border border-neutral-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-neutral-950"
-                />
-              </div>
-
-              <div>
-                <label htmlFor="q4-occupation" className="block text-xs font-semibold text-neutral-800 mb-1">
-                  Parent / Guardian Occupation *
-                </label>
-                <input
-                  id="q4-occupation"
-                  type="text"
-                  {...register('parentOccupation')}
-                  placeholder="e.g. Daily wage tailor"
-                  className="w-full border border-neutral-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-neutral-950"
-                />
-                {errors.parentOccupation && (
-                  <p className="text-xs text-red-600 mt-1">{errors.parentOccupation.message}</p>
-                )}
-              </div>
-
-              <div>
-                <label htmlFor="q2-members" className="block text-xs font-semibold text-neutral-800 mb-1">
-                  Number of Family Members *
-                </label>
-                <input
-                  id="q2-members"
-                  type="text"
-                  {...register('familyMembersCount')}
-                  placeholder="e.g. 4"
-                  className="w-full border border-neutral-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-neutral-950"
-                />
-              </div>
-
-              <div className="sm:col-span-2">
-                <label htmlFor="q6-housing" className="block text-xs font-semibold text-neutral-800 mb-1">
-                  Housing Status *
-                </label>
-                <select
-                  id="q6-housing"
-                  {...register('housingType')}
-                  className="w-full border border-neutral-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-neutral-950"
-                >
-                  <option value="Rented">Rented (House rent receipt upload required)</option>
-                  <option value="Own">Own (House tax / residential proof upload required)</option>
-                </select>
-              </div>
-            </div>
-          </div>
-
-          {/* SECTION 3: Educational Details */}
-          <div className="space-y-4">
-            <div className="border-b border-neutral-200 pb-2 flex items-center justify-between">
-              <div>
-                <h3 className="font-display text-base font-bold text-neutral-950">
-                  3. Educational Details
-                </h3>
-                <p className="text-xs text-neutral-500">
-                  Schooling history and board examination scores.
-                </p>
-              </div>
-              {hasEducationalDetails && (
-                <span className="text-xs font-semibold text-emerald-700 flex items-center gap-1">
-                  <Check className="w-3.5 h-3.5" /> Validated
-                </span>
-              )}
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label htmlFor="q1-school" className="block text-xs font-semibold text-neutral-800 mb-1">
-                  School Name *
-                </label>
-                <input
-                  id="q1-school"
-                  type="text"
-                  {...register('schoolName')}
-                  placeholder="e.g. Govt Higher Secondary School, Saidapet"
-                  className="w-full border border-neutral-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-neutral-950"
-                />
-                {errors.schoolName && (
-                  <p className="text-xs text-red-600 mt-1">{errors.schoolName.message}</p>
-                )}
-              </div>
-
-              <div>
-                <label htmlFor="q2-school-type" className="block text-xs font-semibold text-neutral-800 mb-1">
-                  School Type *
-                </label>
-                <select
-                  id="q2-school-type"
-                  {...register('schoolType')}
-                  className="w-full border border-neutral-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-neutral-950"
-                >
-                  <option value="Government">Government School</option>
-                  <option value="Private">Private School</option>
-                </select>
-              </div>
-
-              <div>
-                <label htmlFor="q3-medium" className="block text-xs font-semibold text-neutral-800 mb-1">
-                  Medium of Instruction *
-                </label>
-                <select
-                  id="q3-medium"
-                  {...register('mediumOfInstruction')}
-                  className="w-full border border-neutral-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-neutral-950"
-                >
-                  <option value="Tamil">Tamil</option>
-                  <option value="English">English</option>
-                  <option value="Other">Other</option>
-                </select>
-              </div>
-
-              <div>
-                <label htmlFor="q3-stream" className="block text-xs font-semibold text-neutral-800 mb-1">
-                  12th Stream / Major *
-                </label>
-                <input
-                  id="q3-stream"
-                  type="text"
-                  {...register('stream')}
-                  placeholder="e.g. Computer Science / Maths"
-                  className="w-full border border-neutral-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-neutral-950"
-                />
-              </div>
-
-              <div>
-                <label htmlFor="q3-tenth" className="block text-xs font-semibold text-neutral-800 mb-1">
-                  10th Board Marks *
-                </label>
-                <input
-                  id="q3-tenth"
-                  type="text"
-                  {...register('tenthMarks')}
-                  placeholder="e.g. 464 / 500 (92.8%)"
-                  className="w-full border border-neutral-300 rounded-lg px-3 py-2 text-sm font-mono tabular-nums focus:outline-none focus:ring-2 focus:ring-neutral-950"
-                />
-                {errors.tenthMarks && (
-                  <p className="text-xs text-red-600 mt-1">{errors.tenthMarks.message}</p>
-                )}
-              </div>
-
-              <div>
-                <label htmlFor="q3-twelfth" className="block text-xs font-semibold text-neutral-800 mb-1">
-                  12th Board Marks *
-                </label>
-                <input
-                  id="q3-twelfth"
-                  type="text"
-                  {...register('twelfthMarks')}
-                  placeholder="e.g. 552 / 600 (92.0%)"
-                  className="w-full border border-neutral-300 rounded-lg px-3 py-2 text-sm font-mono tabular-nums focus:outline-none focus:ring-2 focus:ring-neutral-950"
-                />
-                {errors.twelfthMarks && (
-                  <p className="text-xs text-red-600 mt-1">{errors.twelfthMarks.message}</p>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* SECTION 4: Financial Details */}
-          <div className="space-y-4">
-            <div className="border-b border-neutral-200 pb-2 flex items-center justify-between">
-              <div>
-                <h3 className="font-display text-base font-bold text-neutral-950">
-                  4. Financial Details
-                </h3>
-                <p className="text-xs text-neutral-500">
-                  Annual household income and need statement.
-                </p>
-              </div>
-              {hasFinancialDetails && (
-                <span className="text-xs font-semibold text-emerald-700 flex items-center gap-1">
-                  <Check className="w-3.5 h-3.5" /> Validated
-                </span>
-              )}
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label htmlFor="q5-income" className="block text-xs font-semibold text-neutral-800 mb-1">
-                  Family Annual Income *
-                </label>
-                <input
-                  id="q5-income"
-                  type="text"
-                  {...register('familyAnnualIncome')}
-                  placeholder="e.g. Rs 95,000"
-                  className="w-full border border-neutral-300 rounded-lg px-3 py-2 text-sm font-mono tabular-nums focus:outline-none focus:ring-2 focus:ring-neutral-950"
-                />
-                {errors.familyAnnualIncome && (
-                  <p className="text-xs text-red-600 mt-1">{errors.familyAnnualIncome.message}</p>
-                )}
-              </div>
-
-              <div>
-                <label htmlFor="q5-source" className="block text-xs font-semibold text-neutral-800 mb-1">
-                  Primary Income Source *
-                </label>
-                <input
-                  id="q5-source"
-                  type="text"
-                  {...register('incomeSource')}
-                  placeholder="e.g. Daily wage tailoring / Agricultural labour"
-                  className="w-full border border-neutral-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-neutral-950"
-                />
-              </div>
-
-              <div className="sm:col-span-2">
-                <label htmlFor="q7-why" className="block text-xs font-semibold text-neutral-800 mb-1">
-                  Statement of Need: Why Maatram? *
-                </label>
-                <textarea
-                  id="q7-why"
-                  rows={3}
-                  {...register('whyMaatram')}
-                  placeholder="Explain your household challenges and how Maatram One scholarship and mentorship will enable your higher education..."
-                  className="w-full border border-neutral-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-neutral-950"
-                />
-                {errors.whyMaatram && (
-                  <p className="text-xs text-red-600 mt-1">{errors.whyMaatram.message}</p>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* SECTION 5: Document Uploads (Completed in the same process!) */}
-          <div className="space-y-4">
-            <div className="border-b border-neutral-200 pb-2 flex items-center justify-between">
-              <div>
-                <h3 className="font-display text-base font-bold text-neutral-950">
-                  5. Supporting Documents Upload
-                </h3>
-                <p className="text-xs text-neutral-500">
-                  All supporting documents must be completed directly in this application process.
-                </p>
-              </div>
-              {hasAllRequiredDocs && (
-                <span className="text-xs font-semibold text-emerald-700 flex items-center gap-1">
-                  <Check className="w-3.5 h-3.5" /> All Uploaded
-                </span>
-              )}
-            </div>
-
-            {uploadProgress !== null && (
-              <div className="p-3 bg-neutral-50 border border-neutral-200 rounded-xl space-y-1.5">
-                <div className="flex justify-between text-xs font-mono text-neutral-700">
-                  <span>Uploading {activeUploadLabel || 'document'}...</span>
-                  <span>{uploadProgress}%</span>
-                </div>
-                <div className="w-full h-2 bg-neutral-200 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-[#FFC20E] transition-all duration-150"
-                    style={{ width: `${uploadProgress}%` }}
-                  />
-                </div>
-              </div>
-            )}
-
-            {uploadError && (
-              <div className="p-3 rounded-xl border border-red-200 bg-red-50 text-red-900 text-xs flex items-center gap-2">
-                <AlertCircle className="w-4 h-4 shrink-0 text-red-600" />
-                <span>{uploadError}</span>
-              </div>
-            )}
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* 1. Income Certificate */}
-              <div className="p-4 border border-neutral-200 rounded-xl space-y-2.5 bg-neutral-50/50">
-                <div className="flex items-center justify-between">
-                  <p className="text-xs font-bold text-neutral-900">
-                    a. Income Certificate *
-                  </p>
-                  {hasIncomeCert ? (
-                    <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[11px] font-bold inline-flex items-center gap-1">
-                      <Check className="w-3 h-3" /> Uploaded
-                    </span>
-                  ) : (
-                    <span className="px-2 py-0.5 rounded bg-neutral-200 text-neutral-600 text-[11px] font-medium">
-                      Required
-                    </span>
-                  )}
-                </div>
-                <p className="text-[11px] text-neutral-500">
-                  Revenue department or Tahsildar issued income proof.
-                </p>
-                <div className="flex items-center gap-2 pt-1">
-                  <label className="cursor-pointer inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-neutral-950 text-white hover:bg-neutral-800 transition-colors">
-                    <Upload className="w-3.5 h-3.5" />
-                    <span>{hasIncomeCert ? 'Replace / Upload File' : 'Choose File'}</span>
-                    <input
-                      type="file"
-                      accept=".pdf,.jpg,.jpeg,.png"
-                      onChange={(e) => handleDocumentFileInput('Income Certificate', e)}
-                      className="sr-only"
-                    />
-                  </label>
-                  <button
-                    type="button"
-                    onClick={() => handleUploadSampleDoc('Income Certificate', 'income_certificate_2026.pdf')}
-                    className="px-2.5 py-1.5 rounded-lg text-xs font-medium border border-neutral-300 bg-white hover:bg-neutral-100 transition-colors text-neutral-700"
-                  >
-                    Sample Upload
-                  </button>
-                </div>
-              </div>
-
-              {/* 2. House Rent Receipt / Ownership Proof */}
-              <div className="p-4 border border-neutral-200 rounded-xl space-y-2.5 bg-neutral-50/50">
-                <div className="flex items-center justify-between">
-                  <p className="text-xs font-bold text-neutral-900">
-                    b. House Rent Receipt / Property Proof *
-                  </p>
-                  {hasRentOrHouseProof ? (
-                    <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[11px] font-bold inline-flex items-center gap-1">
-                      <Check className="w-3 h-3" /> Uploaded
-                    </span>
-                  ) : (
-                    <span className="px-2 py-0.5 rounded bg-neutral-200 text-neutral-600 text-[11px] font-medium">
-                      Required
-                    </span>
-                  )}
-                </div>
-                <p className="text-[11px] text-neutral-500">
-                  {watchHousingType === 'Own'
-                    ? 'House tax receipt / patta copy / ownership proof.'
-                    : 'Recent house rent receipt from landlord.'}
-                </p>
-                <div className="flex items-center gap-2 pt-1">
-                  <label className="cursor-pointer inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-neutral-950 text-white hover:bg-neutral-800 transition-colors">
-                    <Upload className="w-3.5 h-3.5" />
-                    <span>{hasRentOrHouseProof ? 'Replace / Upload File' : 'Choose File'}</span>
-                    <input
-                      type="file"
-                      accept=".pdf,.jpg,.jpeg,.png"
-                      onChange={(e) =>
-                        handleDocumentFileInput(
-                          watchHousingType === 'Own' ? 'House Tax / Property Proof' : 'House Rent Receipt',
-                          e
-                        )
-                      }
-                      className="sr-only"
-                    />
-                  </label>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      handleUploadSampleDoc(
-                        watchHousingType === 'Own' ? 'House Tax / Property Proof' : 'House Rent Receipt',
-                        watchHousingType === 'Own' ? 'property_tax_receipt.pdf' : 'house_rent_receipt.pdf'
-                      )
-                    }
-                    className="px-2.5 py-1.5 rounded-lg text-xs font-medium border border-neutral-300 bg-white hover:bg-neutral-100 transition-colors text-neutral-700"
-                  >
-                    Sample Upload
-                  </button>
-                </div>
-              </div>
-
-              {/* 3. Eligibility Proof (Fee / Govt School Attendance / Employment) */}
-              <div className="p-4 border border-neutral-200 rounded-xl space-y-2.5 bg-neutral-50/50">
-                <div className="flex items-center justify-between">
-                  <p className="text-xs font-bold text-neutral-900">
-                    c. Eligibility Proof *
-                  </p>
-                  {hasEligibilityProof ? (
-                    <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[11px] font-bold inline-flex items-center gap-1">
-                      <Check className="w-3 h-3" /> Uploaded
-                    </span>
-                  ) : (
-                    <span className="px-2 py-0.5 rounded bg-neutral-200 text-neutral-600 text-[11px] font-medium">
-                      Required
-                    </span>
-                  )}
-                </div>
-                <div>
-                  <label className="block text-[11px] font-semibold text-neutral-700 mb-1">
-                    Select proof type to provide:
-                  </label>
-                  <select
-                    {...register('eligibilityProofType')}
-                    className="w-full border border-neutral-300 rounded-lg px-2.5 py-1.5 text-xs bg-white"
-                  >
-                    <option value="govt_school_attendance">Government school attendance proof</option>
-                    <option value="school_fee_receipt">Previous-year school fee payment proof</option>
-                    <option value="employment_proof">Current employment proof</option>
-                  </select>
-                </div>
-                <div className="flex items-center gap-2 pt-1">
-                  <label className="cursor-pointer inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-neutral-950 text-white hover:bg-neutral-800 transition-colors">
-                    <Upload className="w-3.5 h-3.5" />
-                    <span>{hasEligibilityProof ? 'Replace / Upload File' : 'Choose File'}</span>
-                    <input
-                      type="file"
-                      accept=".pdf,.jpg,.jpeg,.png"
-                      onChange={(e) => {
-                        const lbl =
-                          watchEligibilityProofType === 'school_fee_receipt'
-                            ? 'Previous-Year School Fee Receipt'
-                            : watchEligibilityProofType === 'employment_proof'
-                              ? 'Current Employment Proof'
-                              : 'Government School Attendance Proof';
-                        handleDocumentFileInput(lbl, e);
-                      }}
-                      className="sr-only"
-                    />
-                  </label>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const lbl =
-                        watchEligibilityProofType === 'school_fee_receipt'
-                          ? 'Previous-Year School Fee Receipt'
-                          : watchEligibilityProofType === 'employment_proof'
-                            ? 'Current Employment Proof'
-                            : 'Government School Attendance Proof';
-                      handleUploadSampleDoc(lbl, `${watchEligibilityProofType}_proof.pdf`);
-                    }}
-                    className="px-2.5 py-1.5 rounded-lg text-xs font-medium border border-neutral-300 bg-white hover:bg-neutral-100 transition-colors text-neutral-700"
-                  >
-                    Sample Upload
-                  </button>
-                </div>
-              </div>
-
-              {/* 4. Electricity Bill */}
-              <div className="p-4 border border-neutral-200 rounded-xl space-y-2.5 bg-neutral-50/50">
-                <div className="flex items-center justify-between">
-                  <p className="text-xs font-bold text-neutral-900">
-                    d. Electricity Bill (EB Card / Bill) *
-                  </p>
-                  {hasElectricityBill ? (
-                    <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[11px] font-bold inline-flex items-center gap-1">
-                      <Check className="w-3 h-3" /> Uploaded
-                    </span>
-                  ) : (
-                    <span className="px-2 py-0.5 rounded bg-neutral-200 text-neutral-600 text-[11px] font-medium">
-                      Required
-                    </span>
-                  )}
-                </div>
-                <p className="text-[11px] text-neutral-500">
-                  Latest TANGEDCO / Electricity board consumption bill.
-                </p>
-                <div className="flex items-center gap-2 pt-1">
-                  <label className="cursor-pointer inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-neutral-950 text-white hover:bg-neutral-800 transition-colors">
-                    <Upload className="w-3.5 h-3.5" />
-                    <span>{hasElectricityBill ? 'Replace / Upload File' : 'Choose File'}</span>
-                    <input
-                      type="file"
-                      accept=".pdf,.jpg,.jpeg,.png"
-                      onChange={(e) => handleDocumentFileInput('Electricity Bill', e)}
-                      className="sr-only"
-                    />
-                  </label>
-                  <button
-                    type="button"
-                    onClick={() => handleUploadSampleDoc('Electricity Bill', 'electricity_bill_latest.pdf')}
-                    className="px-2.5 py-1.5 rounded-lg text-xs font-medium border border-neutral-300 bg-white hover:bg-neutral-100 transition-colors text-neutral-700"
-                  >
-                    Sample Upload
-                  </button>
-                </div>
-              </div>
-
-              {/* 5. Marksheets (10th & 12th) */}
-              <div className="p-4 border border-neutral-200 rounded-xl space-y-2.5 bg-neutral-50/50">
-                <div className="flex items-center justify-between">
-                  <p className="text-xs font-bold text-neutral-900">
-                    e. 10th & 12th Board Marksheets *
-                  </p>
-                  {hasMarksheets ? (
-                    <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[11px] font-bold inline-flex items-center gap-1">
-                      <Check className="w-3 h-3" /> Both Uploaded
-                    </span>
-                  ) : (
-                    <span className="px-2 py-0.5 rounded bg-neutral-200 text-neutral-600 text-[11px] font-medium">
-                      Required
-                    </span>
-                  )}
-                </div>
-                <p className="text-[11px] text-neutral-500">
-                  Official board issued grade sheets or online results.
-                </p>
-                <div className="flex flex-wrap items-center gap-2 pt-1">
-                  <label className="cursor-pointer inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-neutral-950 text-white hover:bg-neutral-800 transition-colors">
-                    <Upload className="w-3.5 h-3.5" />
-                    <span>{uploadedDocLabels.has('10th Marksheet') ? 'Replace 10th' : 'Upload 10th'}</span>
-                    <input
-                      type="file"
-                      accept=".pdf,.jpg,.jpeg,.png"
-                      onChange={(e) => handleDocumentFileInput('10th Marksheet', e)}
-                      className="sr-only"
-                    />
-                  </label>
-                  <label className="cursor-pointer inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-neutral-950 text-white hover:bg-neutral-800 transition-colors">
-                    <Upload className="w-3.5 h-3.5" />
-                    <span>{uploadedDocLabels.has('12th Marksheet') ? 'Replace 12th' : 'Upload 12th'}</span>
-                    <input
-                      type="file"
-                      accept=".pdf,.jpg,.jpeg,.png"
-                      onChange={(e) => handleDocumentFileInput('12th Marksheet', e)}
-                      className="sr-only"
-                    />
-                  </label>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      handleUploadSampleDoc('10th Marksheet', 'marksheet_10th.pdf');
-                      handleUploadSampleDoc('12th Marksheet', 'marksheet_12th.pdf');
-                    }}
-                    className="px-2.5 py-1.5 rounded-lg text-xs font-medium border border-neutral-300 bg-white hover:bg-neutral-100 transition-colors text-neutral-700"
-                  >
-                    Sample Marksheets
-                  </button>
-                </div>
-              </div>
-
-              {/* 6. House Photo */}
-              <div className="p-4 border border-neutral-200 rounded-xl space-y-2.5 bg-neutral-50/50">
-                <div className="flex items-center justify-between">
-                  <p className="text-xs font-bold text-neutral-900">
-                    f. One House Photo *
-                  </p>
-                  {hasHousePhoto ? (
-                    <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[11px] font-bold inline-flex items-center gap-1">
-                      <Check className="w-3 h-3" /> Uploaded
-                    </span>
-                  ) : (
-                    <span className="px-2 py-0.5 rounded bg-neutral-200 text-neutral-600 text-[11px] font-medium">
-                      Required
-                    </span>
-                  )}
-                </div>
-                <p className="text-[11px] text-neutral-500">
-                  Front exterior photograph of residential dwelling.
-                </p>
-                <div className="flex items-center gap-2 pt-1">
-                  <label className="cursor-pointer inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-neutral-950 text-white hover:bg-neutral-800 transition-colors">
-                    <Upload className="w-3.5 h-3.5" />
-                    <span>{hasHousePhoto ? 'Replace / Upload Photo' : 'Choose Photo'}</span>
-                    <input
-                      type="file"
-                      accept=".jpg,.jpeg,.png"
-                      onChange={(e) => handleDocumentFileInput('One House Photo', e)}
-                      className="sr-only"
-                    />
-                  </label>
-                  <button
-                    type="button"
-                    onClick={() => handleUploadSampleDoc('One House Photo', 'residence_front.jpg')}
-                    className="px-2.5 py-1.5 rounded-lg text-xs font-medium border border-neutral-300 bg-white hover:bg-neutral-100 transition-colors text-neutral-700"
-                  >
-                    Sample Photo
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* SECTION 6: Simulated OTP Flow (Frontend Demonstration Only) */}
-          <div className="space-y-4 pt-2 border-t border-neutral-200">
-            <div className="border-b border-neutral-200 pb-2 flex items-center justify-between">
-              <div>
-                <h3 className="font-display text-base font-bold text-neutral-950">
-                  6. Phone Verification (Simulated OTP Flow)
-                </h3>
-                <p className="text-xs text-neutral-500">
-                  Frontend demonstration only — verify applicant contact number.
-                </p>
-              </div>
-              {otpVerified && (
-                <span className="text-xs font-semibold text-emerald-700 flex items-center gap-1">
-                  <Check className="w-3.5 h-3.5" /> Verified
-                </span>
-              )}
-            </div>
-
-            <div className="bg-amber-50/70 border border-amber-200 rounded-2xl p-4 sm:p-5 space-y-3">
-              <div className="flex items-center gap-2 text-xs font-bold text-amber-950">
-                <Smartphone className="w-4 h-4 text-amber-600 shrink-0" />
-                <span>Prototype Simulated OTP Verification</span>
-              </div>
-              <p className="text-xs text-amber-900">
-                This simulated OTP verifies the applicant's mobile contact number for prototype demonstration without connecting an external SMS provider.
-              </p>
-
-              {otpVerified ? (
-                <div className="p-3 bg-white border border-emerald-300 rounded-xl flex items-center gap-2 text-emerald-900 text-xs font-semibold">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                  <span>✓ Phone Verified: {watchPhone || activePerson.phone || 'Contact authenticated'} [Mock Verification State]</span>
-                </div>
-              ) : (
-                <div className="space-y-3 pt-1">
-                  <div className="flex flex-wrap items-center gap-3">
-                    <button
-                      type="button"
-                      onClick={handleSendSimulatedOtp}
-                      className="px-4 py-2 rounded-xl text-xs font-bold bg-neutral-950 text-white hover:bg-neutral-800 transition-colors"
-                    >
-                      {otpSent ? 'Resend Simulated OTP' : 'Send Verification OTP'}
-                    </button>
-                    <span className="text-xs text-neutral-600 font-mono">
-                      Target Phone: <strong className="text-neutral-950">{watchPhone || 'Enter phone above'}</strong>
-                    </span>
-                  </div>
-
-                  {otpSent && (
-                    <div className="p-3 bg-white border border-amber-300 rounded-xl space-y-2">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs text-amber-900 font-medium">
-                          Simulated OTP dispatched to phone:
-                        </span>
-                        <span className="font-mono text-sm font-bold bg-amber-100 text-amber-950 px-2 py-0.5 rounded border border-amber-300">
-                          {demoOtpCode}
-                        </span>
+                  {uploadProgress !== null && (
+                    <div className="p-3 bg-neutral-50 border border-neutral-200 rounded-xl space-y-1.5">
+                      <div className="flex justify-between text-xs font-mono text-neutral-700">
+                        <span>Uploading {activeUploadLabel || 'document'}...</span>
+                        <span>{uploadProgress}%</span>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="text"
-                          maxLength={6}
-                          value={enteredOtp}
-                          onChange={(e) => {
-                            setEnteredOtp(e.target.value);
-                            setOtpError('');
-                          }}
-                          placeholder="Enter 6-digit OTP"
-                          className="w-40 px-3 py-1.5 border border-neutral-300 rounded-lg text-xs font-mono font-bold tracking-widest text-center"
+                      <div className="w-full h-2 bg-neutral-200 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-[#FFC20E] transition-all duration-150"
+                          style={{ width: `${uploadProgress}%` }}
                         />
+                      </div>
+                    </div>
+                  )}
+
+                  {uploadError && (
+                    <div className="p-3 rounded-xl border border-red-200 bg-red-50 text-red-900 text-xs flex items-center gap-2">
+                      <AlertCircle className="w-4 h-4 shrink-0 text-red-600" />
+                      <span>{uploadError}</span>
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {/* 1. Income Certificate */}
+                    <div className="p-4 border border-neutral-200 rounded-xl space-y-2.5 bg-neutral-50/50">
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs font-bold text-neutral-900">
+                          a. Income Certificate *
+                        </p>
+                        {hasIncomeCert ? (
+                          <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[11px] font-bold inline-flex items-center gap-1">
+                            <Check className="w-3 h-3" /> Uploaded
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded bg-neutral-200 text-neutral-600 text-[11px] font-medium">
+                            Required
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-neutral-500">
+                        Revenue department or Tahsildar issued income proof.
+                      </p>
+                      {uploadedDocs.find((d) => d.label === 'Income Certificate') && (
+                        <div className="p-2 bg-white border border-neutral-200 rounded-lg flex items-center justify-between text-xs">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <FileText className="w-3.5 h-3.5 text-neutral-500 shrink-0" />
+                            <span className="truncate font-mono text-[11px] text-neutral-800">
+                              {uploadedDocs.find((d) => d.label === 'Income Certificate')?.fileName}
+                            </span>
+                            {uploadedDocs.find((d) => d.label === 'Income Certificate')?.fileName?.toLowerCase().includes('demo') && (
+                              <span className="text-[9px] font-bold uppercase tracking-wider bg-amber-100 text-amber-900 border border-amber-300 px-1.5 py-0.2 rounded shrink-0">
+                                DEMO FILE
+                              </span>
+                            )}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const doc = uploadedDocs.find((d) => d.label === 'Income Certificate');
+                              if (doc) setPreviewDoc(doc);
+                            }}
+                            className="text-[11px] font-semibold text-neutral-700 hover:text-neutral-950 flex items-center gap-1 cursor-pointer ml-2 shrink-0"
+                          >
+                            <Eye className="w-3 h-3" /> Preview
+                          </button>
+                        </div>
+                      )}
+                      <div className="flex flex-wrap items-center gap-2 pt-1">
+                        <label className="cursor-pointer inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-neutral-950 text-white hover:bg-neutral-800 transition-colors">
+                          <Upload className="w-3.5 h-3.5" />
+                          <span>{hasIncomeCert ? 'Replace File' : 'Choose File'}</span>
+                          <input
+                            type="file"
+                            accept=".pdf,.jpg,.jpeg,.png"
+                            onChange={(e) => handleDocumentFileInput('Income Certificate', e)}
+                            className="sr-only"
+                          />
+                        </label>
                         <button
                           type="button"
-                          onClick={handleVerifySimulatedOtp}
-                          className="px-4 py-1.5 rounded-lg text-xs font-bold bg-[#FFC20E] text-neutral-950 hover:bg-[#e5ae0b] transition-colors"
+                          onClick={() => handleUploadSampleDoc('Income Certificate', 'income_certificate_demo.pdf', 'application/pdf', 'DEMO FILE · Income Certificate')}
+                          className="px-2.5 py-1.5 rounded-lg text-xs font-medium border border-neutral-300 bg-white hover:bg-neutral-100 transition-colors text-neutral-800 flex items-center gap-1 cursor-pointer"
                         >
-                          Verify Code
+                          <Sparkles className="w-3 h-3 text-[#FFC20E]" />
+                          <span>Use Demo Data</span>
                         </button>
                       </div>
-                      {otpError && (
-                        <p className="text-xs text-red-600 font-medium">{otpError}</p>
+                    </div>
+
+                    {/* 2. House Rent Receipt / Ownership Proof */}
+                    <div className="p-4 border border-neutral-200 rounded-xl space-y-2.5 bg-neutral-50/50">
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs font-bold text-neutral-900">
+                          b. House Rent Receipt / Property Proof *
+                        </p>
+                        {hasRentOrHouseProof ? (
+                          <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[11px] font-bold inline-flex items-center gap-1">
+                            <Check className="w-3 h-3" /> Uploaded
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded bg-neutral-200 text-neutral-600 text-[11px] font-medium">
+                            Required
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-neutral-500">
+                        {watchHousingType === 'Own'
+                          ? 'House tax receipt / patta copy / ownership proof.'
+                          : 'Recent house rent receipt from landlord.'}
+                      </p>
+                      {uploadedDocs.find((d) => d.label === 'House Rent Receipt' || d.label === 'House Tax / Property Proof') && (
+                        <div className="p-2 bg-white border border-neutral-200 rounded-lg flex items-center justify-between text-xs">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <FileText className="w-3.5 h-3.5 text-neutral-500 shrink-0" />
+                            <span className="truncate font-mono text-[11px] text-neutral-800">
+                              {uploadedDocs.find((d) => d.label === 'House Rent Receipt' || d.label === 'House Tax / Property Proof')?.fileName}
+                            </span>
+                            {uploadedDocs.find((d) => d.label === 'House Rent Receipt' || d.label === 'House Tax / Property Proof')?.fileName?.toLowerCase().includes('demo') && (
+                              <span className="text-[9px] font-bold uppercase tracking-wider bg-amber-100 text-amber-900 border border-amber-300 px-1.5 py-0.2 rounded shrink-0">
+                                DEMO FILE
+                              </span>
+                            )}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const doc = uploadedDocs.find((d) => d.label === 'House Rent Receipt' || d.label === 'House Tax / Property Proof');
+                              if (doc) setPreviewDoc(doc);
+                            }}
+                            className="text-[11px] font-semibold text-neutral-700 hover:text-neutral-950 flex items-center gap-1 cursor-pointer ml-2 shrink-0"
+                          >
+                            <Eye className="w-3 h-3" /> Preview
+                          </button>
+                        </div>
                       )}
+                      <div className="flex flex-wrap items-center gap-2 pt-1">
+                        <label className="cursor-pointer inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-neutral-950 text-white hover:bg-neutral-800 transition-colors">
+                          <Upload className="w-3.5 h-3.5" />
+                          <span>{hasRentOrHouseProof ? 'Replace File' : 'Choose File'}</span>
+                          <input
+                            type="file"
+                            accept=".pdf,.jpg,.jpeg,.png"
+                            onChange={(e) =>
+                              handleDocumentFileInput(
+                                watchHousingType === 'Own' ? 'House Tax / Property Proof' : 'House Rent Receipt',
+                                e
+                              )
+                            }
+                            className="sr-only"
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleUploadSampleDoc(
+                              watchHousingType === 'Own' ? 'House Tax / Property Proof' : 'House Rent Receipt',
+                              watchHousingType === 'Own' ? 'property_tax_receipt_demo.pdf' : 'house_rent_receipt_demo.pdf',
+                              'application/pdf',
+                              'DEMO FILE · House Proof'
+                            )
+                          }
+                          className="px-2.5 py-1.5 rounded-lg text-xs font-medium border border-neutral-300 bg-white hover:bg-neutral-100 transition-colors text-neutral-800 flex items-center gap-1 cursor-pointer"
+                        >
+                          <Sparkles className="w-3 h-3 text-[#FFC20E]" />
+                          <span>Use Demo Data</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* 3. Eligibility Proof */}
+                    <div className="p-4 border border-neutral-200 rounded-xl space-y-2.5 bg-neutral-50/50">
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs font-bold text-neutral-900">
+                          c. Eligibility Proof *
+                        </p>
+                        {hasEligibilityProof ? (
+                          <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[11px] font-bold inline-flex items-center gap-1">
+                            <Check className="w-3 h-3" /> Uploaded
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded bg-neutral-200 text-neutral-600 text-[11px] font-medium">
+                            Required
+                          </span>
+                        )}
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-semibold text-neutral-700 mb-1">
+                          Select proof type to provide:
+                        </label>
+                        <select
+                          {...register('eligibilityProofType')}
+                          className="w-full border border-neutral-300 rounded-lg px-2.5 py-1.5 text-xs bg-white"
+                        >
+                          <option value="govt_school_attendance">Government school attendance proof</option>
+                          <option value="school_fee_receipt">Previous-year school fee payment proof</option>
+                          <option value="employment_proof">Current employment proof</option>
+                        </select>
+                      </div>
+                      {uploadedDocs.find((d) => d.label.includes('Proof') || d.label.includes('Receipt')) && (
+                        <div className="p-2 bg-white border border-neutral-200 rounded-lg flex items-center justify-between text-xs">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <FileText className="w-3.5 h-3.5 text-neutral-500 shrink-0" />
+                            <span className="truncate font-mono text-[11px] text-neutral-800">
+                              {uploadedDocs.find((d) => d.label.includes('Proof') || d.label.includes('Receipt'))?.fileName}
+                            </span>
+                            {uploadedDocs.find((d) => d.label.includes('Proof') || d.label.includes('Receipt'))?.fileName?.toLowerCase().includes('demo') && (
+                              <span className="text-[9px] font-bold uppercase tracking-wider bg-amber-100 text-amber-900 border border-amber-300 px-1.5 py-0.2 rounded shrink-0">
+                                DEMO FILE
+                              </span>
+                            )}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const doc = uploadedDocs.find((d) => d.label.includes('Proof') || d.label.includes('Receipt'));
+                              if (doc) setPreviewDoc(doc);
+                            }}
+                            className="text-[11px] font-semibold text-neutral-700 hover:text-neutral-950 flex items-center gap-1 cursor-pointer ml-2 shrink-0"
+                          >
+                            <Eye className="w-3 h-3" /> Preview
+                          </button>
+                        </div>
+                      )}
+                      <div className="flex flex-wrap items-center gap-2 pt-1">
+                        <label className="cursor-pointer inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-neutral-950 text-white hover:bg-neutral-800 transition-colors">
+                          <Upload className="w-3.5 h-3.5" />
+                          <span>{hasEligibilityProof ? 'Replace File' : 'Choose File'}</span>
+                          <input
+                            type="file"
+                            accept=".pdf,.jpg,.jpeg,.png"
+                            onChange={(e) => {
+                              const lbl =
+                                watchEligibilityProofType === 'school_fee_receipt'
+                                  ? 'Previous-Year School Fee Receipt'
+                                  : watchEligibilityProofType === 'employment_proof'
+                                    ? 'Current Employment Proof'
+                                    : 'Government School Attendance Proof';
+                              handleDocumentFileInput(lbl, e);
+                            }}
+                            className="sr-only"
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const lbl =
+                              watchEligibilityProofType === 'school_fee_receipt'
+                                ? 'Previous-Year School Fee Receipt'
+                                : watchEligibilityProofType === 'employment_proof'
+                                  ? 'Current Employment Proof'
+                                  : 'Government School Attendance Proof';
+                            handleUploadSampleDoc(lbl, `${watchEligibilityProofType || 'eligibility'}_proof_demo.pdf`, 'application/pdf', 'DEMO FILE · Eligibility Proof');
+                          }}
+                          className="px-2.5 py-1.5 rounded-lg text-xs font-medium border border-neutral-300 bg-white hover:bg-neutral-100 transition-colors text-neutral-800 flex items-center gap-1 cursor-pointer"
+                        >
+                          <Sparkles className="w-3 h-3 text-[#FFC20E]" />
+                          <span>Use Demo Data</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* 4. Electricity Bill */}
+                    <div className="p-4 border border-neutral-200 rounded-xl space-y-2.5 bg-neutral-50/50">
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs font-bold text-neutral-900">
+                          d. Electricity Bill (EB Card / Bill) *
+                        </p>
+                        {hasElectricityBill ? (
+                          <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[11px] font-bold inline-flex items-center gap-1">
+                            <Check className="w-3 h-3" /> Uploaded
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded bg-neutral-200 text-neutral-600 text-[11px] font-medium">
+                            Required
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-neutral-500">
+                        Latest TANGEDCO / Electricity board consumption bill.
+                      </p>
+                      {uploadedDocs.find((d) => d.label === 'Electricity Bill') && (
+                        <div className="p-2 bg-white border border-neutral-200 rounded-lg flex items-center justify-between text-xs">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <FileText className="w-3.5 h-3.5 text-neutral-500 shrink-0" />
+                            <span className="truncate font-mono text-[11px] text-neutral-800">
+                              {uploadedDocs.find((d) => d.label === 'Electricity Bill')?.fileName}
+                            </span>
+                            {uploadedDocs.find((d) => d.label === 'Electricity Bill')?.fileName?.toLowerCase().includes('demo') && (
+                              <span className="text-[9px] font-bold uppercase tracking-wider bg-amber-100 text-amber-900 border border-amber-300 px-1.5 py-0.2 rounded shrink-0">
+                                DEMO FILE
+                              </span>
+                            )}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const doc = uploadedDocs.find((d) => d.label === 'Electricity Bill');
+                              if (doc) setPreviewDoc(doc);
+                            }}
+                            className="text-[11px] font-semibold text-neutral-700 hover:text-neutral-950 flex items-center gap-1 cursor-pointer ml-2 shrink-0"
+                          >
+                            <Eye className="w-3 h-3" /> Preview
+                          </button>
+                        </div>
+                      )}
+                      <div className="flex flex-wrap items-center gap-2 pt-1">
+                        <label className="cursor-pointer inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-neutral-950 text-white hover:bg-neutral-800 transition-colors">
+                          <Upload className="w-3.5 h-3.5" />
+                          <span>{hasElectricityBill ? 'Replace File' : 'Choose File'}</span>
+                          <input
+                            type="file"
+                            accept=".pdf,.jpg,.jpeg,.png"
+                            onChange={(e) => handleDocumentFileInput('Electricity Bill', e)}
+                            className="sr-only"
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => handleUploadSampleDoc('Electricity Bill', 'electricity_bill_demo.pdf', 'application/pdf', 'DEMO FILE · Electricity Bill')}
+                          className="px-2.5 py-1.5 rounded-lg text-xs font-medium border border-neutral-300 bg-white hover:bg-neutral-100 transition-colors text-neutral-800 flex items-center gap-1 cursor-pointer"
+                        >
+                          <Sparkles className="w-3 h-3 text-[#FFC20E]" />
+                          <span>Use Demo Data</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* 5. Marksheets (10th & 12th) */}
+                    <div className="p-4 border border-neutral-200 rounded-xl space-y-2.5 bg-neutral-50/50">
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs font-bold text-neutral-900">
+                          e. 10th & 12th Board Marksheets *
+                        </p>
+                        {hasMarksheets ? (
+                          <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[11px] font-bold inline-flex items-center gap-1">
+                            <Check className="w-3 h-3" /> Both Uploaded
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded bg-neutral-200 text-neutral-600 text-[11px] font-medium">
+                            Required
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-neutral-500">
+                        Official board issued grade sheets or online results.
+                      </p>
+                      {uploadedDocs.find((d) => d.label === '10th Marksheet' || d.label === '12th Marksheet') && (
+                        <div className="space-y-1">
+                          {uploadedDocs.filter((d) => d.label === '10th Marksheet' || d.label === '12th Marksheet').map((d) => (
+                            <div key={d.label} className="p-1.5 bg-white border border-neutral-200 rounded-lg flex items-center justify-between text-xs">
+                              <div className="flex items-center gap-2 min-w-0">
+                                <FileText className="w-3 h-3 text-neutral-500 shrink-0" />
+                                <span className="truncate font-mono text-[11px] text-neutral-800">
+                                  {d.label}: {d.fileName}
+                                </span>
+                                {d.fileName?.toLowerCase().includes('demo') && (
+                                  <span className="text-[9px] font-bold uppercase tracking-wider bg-amber-100 text-amber-900 border border-amber-300 px-1 py-0.2 rounded shrink-0">
+                                    DEMO
+                                  </span>
+                                )}
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => setPreviewDoc(d)}
+                                className="text-[11px] font-semibold text-neutral-700 hover:text-neutral-950 flex items-center gap-1 cursor-pointer ml-2 shrink-0"
+                              >
+                                <Eye className="w-3 h-3" /> Preview
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      <div className="flex flex-wrap items-center gap-2 pt-1">
+                        <label className="cursor-pointer inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-neutral-950 text-white hover:bg-neutral-800 transition-colors">
+                          <Upload className="w-3.5 h-3.5" />
+                          <span>{uploadedDocLabels.has('10th Marksheet') ? 'Replace 10th' : 'Upload 10th'}</span>
+                          <input
+                            type="file"
+                            accept=".pdf,.jpg,.jpeg,.png"
+                            onChange={(e) => handleDocumentFileInput('10th Marksheet', e)}
+                            className="sr-only"
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            handleUploadSampleDoc('10th Marksheet', 'marksheet_10th_demo.pdf', 'application/pdf', 'DEMO FILE · 10th Marksheet');
+                          }}
+                          className="px-2.5 py-1.5 rounded-lg text-xs font-medium border border-neutral-300 bg-white hover:bg-neutral-100 transition-colors text-neutral-800 flex items-center gap-1 cursor-pointer"
+                        >
+                          <Sparkles className="w-3 h-3 text-[#FFC20E]" />
+                          <span>Use Demo 10th Marksheet</span>
+                        </button>
+
+                        <label className="cursor-pointer inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-neutral-950 text-white hover:bg-neutral-800 transition-colors">
+                          <Upload className="w-3.5 h-3.5" />
+                          <span>{uploadedDocLabels.has('12th Marksheet') ? 'Replace 12th' : 'Upload 12th'}</span>
+                          <input
+                            type="file"
+                            accept=".pdf,.jpg,.jpeg,.png"
+                            onChange={(e) => handleDocumentFileInput('12th Marksheet', e)}
+                            className="sr-only"
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            handleUploadSampleDoc('12th Marksheet', 'marksheet_12th_demo.pdf', 'application/pdf', 'DEMO FILE · 12th Marksheet');
+                          }}
+                          className="px-2.5 py-1.5 rounded-lg text-xs font-medium border border-neutral-300 bg-white hover:bg-neutral-100 transition-colors text-neutral-800 flex items-center gap-1 cursor-pointer"
+                        >
+                          <Sparkles className="w-3 h-3 text-[#FFC20E]" />
+                          <span>Use Demo 12th Marksheet</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* 6. House Photo */}
+                    <div className="p-4 border border-neutral-200 rounded-xl space-y-2.5 bg-neutral-50/50">
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs font-bold text-neutral-900">
+                          f. One House Photo *
+                        </p>
+                        {hasHousePhoto ? (
+                          <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[11px] font-bold inline-flex items-center gap-1">
+                            <Check className="w-3 h-3" /> Uploaded
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded bg-neutral-200 text-neutral-600 text-[11px] font-medium">
+                            Required
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-neutral-500">
+                        Front exterior photograph of residential dwelling.
+                      </p>
+                      {uploadedDocs.find((d) => d.label === 'One House Photo') && (
+                        <div className="p-2 bg-white border border-neutral-200 rounded-lg flex items-center justify-between text-xs">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <FileText className="w-3.5 h-3.5 text-neutral-500 shrink-0" />
+                            <span className="truncate font-mono text-[11px] text-neutral-800">
+                              {uploadedDocs.find((d) => d.label === 'One House Photo')?.fileName}
+                            </span>
+                            {uploadedDocs.find((d) => d.label === 'One House Photo')?.fileName?.toLowerCase().includes('demo') && (
+                              <span className="text-[9px] font-bold uppercase tracking-wider bg-amber-100 text-amber-900 border border-amber-300 px-1.5 py-0.2 rounded shrink-0">
+                                DEMO FILE
+                              </span>
+                            )}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const doc = uploadedDocs.find((d) => d.label === 'One House Photo');
+                              if (doc) setPreviewDoc(doc);
+                            }}
+                            className="text-[11px] font-semibold text-neutral-700 hover:text-neutral-950 flex items-center gap-1 cursor-pointer ml-2 shrink-0"
+                          >
+                            <Eye className="w-3 h-3" /> Preview
+                          </button>
+                        </div>
+                      )}
+                      <div className="flex flex-wrap items-center gap-2 pt-1">
+                        <label className="cursor-pointer inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-neutral-950 text-white hover:bg-neutral-800 transition-colors">
+                          <Upload className="w-3.5 h-3.5" />
+                          <span>{hasHousePhoto ? 'Replace Photo' : 'Choose Photo'}</span>
+                          <input
+                            type="file"
+                            accept=".jpg,.jpeg,.png"
+                            onChange={(e) => handleDocumentFileInput('One House Photo', e)}
+                            className="sr-only"
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => handleUploadSampleDoc('One House Photo', 'house_photo_demo.jpg', 'image/jpeg', 'DEMO FILE · House Photograph')}
+                          className="px-2.5 py-1.5 rounded-lg text-xs font-medium border border-neutral-300 bg-white hover:bg-neutral-100 transition-colors text-neutral-800 flex items-center gap-1 cursor-pointer"
+                        >
+                          <Sparkles className="w-3 h-3 text-[#FFC20E]" />
+                          <span>Use Demo Data</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* SECTION 6: Simulated OTP Flow (Frontend Demonstration Only) */}
+                <div className="space-y-4 pt-2 border-t border-neutral-200">
+                  <div className="border-b border-neutral-200 pb-2 flex items-center justify-between">
+                    <div>
+                      <h3 className="font-display text-base font-bold text-neutral-950">
+                        6. Phone Verification (Simulated OTP Flow)
+                      </h3>
+                      <p className="text-xs text-neutral-500">
+                        Frontend demonstration only — verify applicant contact number.
+                      </p>
+                    </div>
+                    {otpVerified && (
+                      <span className="text-xs font-semibold text-emerald-700 flex items-center gap-1">
+                        <Check className="w-3.5 h-3.5" /> Verified
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="bg-amber-50/70 border border-amber-200 rounded-2xl p-4 sm:p-5 space-y-3">
+                    <div className="flex items-center gap-2 text-xs font-bold text-amber-950">
+                      <Smartphone className="w-4 h-4 text-amber-600 shrink-0" />
+                      <span>Prototype Simulated OTP Verification</span>
+                    </div>
+                    <p className="text-xs text-amber-900">
+                      This simulated OTP verifies the applicant's mobile contact number for prototype demonstration without connecting an external SMS provider.
+                    </p>
+
+                    {otpVerified ? (
+                      <div className="p-3 bg-white border border-emerald-300 rounded-xl flex items-center gap-2 text-emerald-900 text-xs font-semibold">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                        <span>✓ Phone Verified: {watchPhone || activePerson.phone || 'Contact authenticated'} [Mock Verification State]</span>
+                      </div>
+                    ) : (
+                      <div className="space-y-3 pt-1">
+                        <div className="flex flex-wrap items-center gap-3">
+                          <button
+                            type="button"
+                            onClick={handleSendSimulatedOtp}
+                            className="px-4 py-2 rounded-xl text-xs font-bold bg-neutral-950 text-white hover:bg-neutral-800 transition-colors cursor-pointer"
+                          >
+                            {otpSent ? 'Resend Simulated OTP' : 'Send Verification OTP'}
+                          </button>
+                          <span className="text-xs text-neutral-600 font-mono">
+                            Target Phone: <strong className="text-neutral-950">{watchPhone || 'Enter phone in Section 1'}</strong>
+                          </span>
+                        </div>
+
+                        {otpSent && (
+                          <div className="p-3 bg-white border border-amber-300 rounded-xl space-y-3">
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs text-amber-900 font-medium">
+                                Simulated OTP dispatched to phone:
+                              </span>
+                              <span className="font-mono text-sm font-bold bg-amber-100 text-amber-950 px-2 py-0.5 rounded border border-amber-300">
+                                {demoOtpCode}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="text"
+                                maxLength={6}
+                                value={enteredOtp}
+                                onChange={(e) => {
+                                  setEnteredOtp(e.target.value);
+                                  setOtpError('');
+                                }}
+                                placeholder="Enter 6-digit OTP"
+                                className="w-40 px-3 py-1.5 border border-neutral-300 rounded-lg text-xs font-mono font-bold tracking-widest text-center"
+                              />
+                              <button
+                                type="button"
+                                onClick={handleVerifySimulatedOtp}
+                                className="px-4 py-1.5 rounded-lg text-xs font-bold bg-[#FFC20E] text-neutral-950 hover:bg-[#e5ae0b] transition-colors cursor-pointer"
+                              >
+                                Verify Code
+                              </button>
+                            </div>
+                            {otpError && (
+                              <p className="text-xs text-red-600 font-medium">{otpError}</p>
+                            )}
+
+                            {/* Demo OTP Testing Controls */}
+                            <div className="pt-2 border-t border-neutral-200 space-y-1.5">
+                              <div className="flex items-center gap-1.5 text-[11px] font-bold text-neutral-700">
+                                <Sparkles className="w-3 h-3 text-[#FFC20E]" />
+                                <span>Demo OTP Testing Scenarios:</span>
+                              </div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={handleTestValidOtp}
+                                  className="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-emerald-50 text-emerald-900 hover:bg-emerald-100 border border-emerald-300 transition-colors cursor-pointer"
+                                >
+                                  Test Valid OTP
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={handleTestIncorrectOtp}
+                                  className="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-red-50 text-red-900 hover:bg-red-100 border border-red-300 transition-colors cursor-pointer"
+                                >
+                                  Test Incorrect OTP
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={handleTestExpiredOtp}
+                                  className="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-amber-50 text-amber-900 hover:bg-amber-100 border border-amber-300 transition-colors cursor-pointer"
+                                >
+                                  Test Expired OTP
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={handleSendSimulatedOtp}
+                                  className="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-neutral-100 text-neutral-800 hover:bg-neutral-200 border border-neutral-300 transition-colors cursor-pointer"
+                                >
+                                  Resend OTP
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* SECTION 7: Actions & Submit Button Gating */}
+                <div className="pt-4 border-t border-neutral-200 space-y-4">
+                  {!isApplicationSubmitted && (
+                    <div className="space-y-4">
+                      {!isReadyToSubmit && (
+                        <div className="p-4 bg-amber-50/80 border border-amber-200 rounded-2xl text-xs space-y-2">
+                          <div className="flex items-center gap-2 font-bold text-amber-950">
+                            <Info className="w-4 h-4 text-amber-600 shrink-0" />
+                            <span>Submit Application Disabled — Pending Completion</span>
+                          </div>
+                          <p className="text-amber-900">
+                            The Submit Application button remains disabled until all mandatory sections and verification checks are complete:
+                          </p>
+                          <div className="flex flex-wrap gap-2 pt-1 font-medium text-[11px]">
+                            {!hasPersonalDetails && (
+                              <span className="px-2 py-0.5 rounded-full bg-white border border-amber-300 text-amber-900">
+                                • 1. Personal Details
+                              </span>
+                            )}
+                            {!hasFamilyDetails && (
+                              <span className="px-2 py-0.5 rounded-full bg-white border border-amber-300 text-amber-900">
+                                • 2. Family Details
+                              </span>
+                            )}
+                            {!hasEducationalDetails && (
+                              <span className="px-2 py-0.5 rounded-full bg-white border border-amber-300 text-amber-900">
+                                • 3. Educational Details
+                              </span>
+                            )}
+                            {!hasFinancialDetails && (
+                              <span className="px-2 py-0.5 rounded-full bg-white border border-amber-300 text-amber-900">
+                                • 4. Financial Details
+                              </span>
+                            )}
+                            {!hasAllRequiredDocs && (
+                              <span className="px-2 py-0.5 rounded-full bg-white border border-amber-300 text-amber-900">
+                                • 5. Supporting Documents ({[
+                                  hasIncomeCert,
+                                  hasRentOrHouseProof,
+                                  hasEligibilityProof,
+                                  hasElectricityBill,
+                                  hasMarksheets,
+                                  hasHousePhoto,
+                                ].filter(Boolean).length}/6)
+                              </span>
+                            )}
+                            {!otpVerified && (
+                              <span className="px-2 py-0.5 rounded-full bg-white border border-amber-300 text-amber-900">
+                                • 6. Phone OTP Verification
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="flex flex-col sm:flex-row items-center justify-between gap-4 p-5 bg-neutral-50 border border-neutral-200 rounded-2xl">
+                        <div>
+                          {isReadyToSubmit ? (
+                            <div>
+                              <p className="font-bold text-sm text-emerald-950 flex items-center gap-2">
+                                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                                <span>All Application Checks Passed</span>
+                              </p>
+                              <p className="text-xs text-emerald-800 mt-0.5">
+                                All mandatory sections, required verification documents, and phone verification are complete. Click Submit Application to submit.
+                              </p>
+                            </div>
+                          ) : (
+                            <div>
+                              <p className="font-bold text-sm text-neutral-900 flex items-center gap-2">
+                                <Lock className="w-4 h-4 text-neutral-400" />
+                                <span>Application Incomplete</span>
+                              </p>
+                              <p className="text-xs text-neutral-500 mt-0.5">
+                                Complete all sections above or save your current progress as a draft.
+                              </p>
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="flex items-center gap-3 w-full sm:w-auto justify-end">
+                          <button
+                            type="button"
+                            onClick={handleSaveDraft}
+                            className="px-4 py-2.5 rounded-xl text-xs font-semibold border border-neutral-300 bg-white hover:bg-neutral-50 transition-colors cursor-pointer"
+                          >
+                            Save Draft
+                          </button>
+                          <button
+                            type="submit"
+                            disabled={!isReadyToSubmit || !isCycleOpen}
+                            className={`px-8 py-3 rounded-xl text-sm font-bold shadow-xs transition-all flex items-center justify-center gap-2 ${
+                              isReadyToSubmit && isCycleOpen
+                                ? 'bg-[#FFC20E] text-neutral-950 hover:bg-[#e5ae0b] active:scale-95 cursor-pointer'
+                                : 'bg-neutral-200 text-neutral-400 cursor-not-allowed border border-neutral-300'
+                            }`}
+                          >
+                            <Check className="w-4 h-4 stroke-[3]" />
+                            <span>Submit Application</span>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {isApplicationSubmitted && (
+                    <div className="flex flex-col sm:flex-row items-center justify-between gap-4 p-5 bg-neutral-50 border border-neutral-300 rounded-2xl">
+                      <div>
+                        <p className="font-bold text-sm text-neutral-950 flex items-center gap-2">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                          <span>Application Active ({activePerson.applicationCode || activePerson.personId})</span>
+                        </p>
+                        <p className="text-xs text-neutral-600 mt-0.5">
+                          Your applicant details and documents are editable. Click below to save any changes to your application.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleSaveDraft}
+                        className="w-full sm:w-auto px-8 py-3 rounded-xl text-sm font-bold bg-[#FFC20E] text-neutral-950 hover:bg-[#e5ae0b] shadow-sm transition-all flex items-center justify-center gap-2 cursor-pointer"
+                      >
+                        <Save className="w-4 h-4 stroke-[2.5]" />
+                        <span>Save & Update Application</span>
+                      </button>
                     </div>
                   )}
                 </div>
-              )}
+              </form>
             </div>
-          </div>
+          )}
 
-          {/* SECTION 7: Actions & Submit Button Gating */}
-          <div className="pt-4 border-t border-neutral-200 space-y-4">
-            {!isApplicationSubmitted && (
-              <>
-                {!isReadyToSubmit ? (
-                  <div className="p-4 bg-neutral-50 border border-neutral-200 rounded-xl space-y-2">
-                    <div className="flex items-center gap-2 text-xs font-bold text-neutral-800">
-                      <Info className="w-4 h-4 text-neutral-500" />
-                      <span>Submit Button Locked: Complete Required Verification Checks</span>
-                    </div>
-                    <p className="text-xs text-neutral-500">
-                      The final Submit button will appear once all mandatory personal, family, educational, financial fields, all 6 required verification documents, and the simulated OTP verification are complete.
-                    </p>
-                    <div className="flex items-center justify-end">
-                      <button
-                        type="button"
-                        onClick={handleSaveDraft}
-                        className="px-5 py-2.5 rounded-xl text-xs font-semibold border border-neutral-950 text-neutral-950 bg-white hover:bg-neutral-50 transition-colors"
-                      >
-                        Save Progress as Draft
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  /* Display the final Submit button only when all required checks pass */
-                  <div className="flex flex-col sm:flex-row items-center justify-between gap-4 p-5 bg-emerald-50 border border-emerald-200 rounded-2xl">
-                    <div>
-                      <p className="font-bold text-sm text-emerald-950 flex items-center gap-2">
-                        <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                        <span>All Application Checks Passed</span>
-                      </p>
-                      <p className="text-xs text-emerald-800 mt-0.5">
-                        Your scholarship details, uploaded proofs, and identity reference are ready for submission.
-                      </p>
-                    </div>
-
-                    <div className="flex items-center gap-3">
-                      <button
-                        type="button"
-                        onClick={handleSaveDraft}
-                        className="px-4 py-2.5 rounded-xl text-xs font-semibold border border-neutral-300 bg-white hover:bg-neutral-50 transition-colors"
-                      >
-                        Save Draft
-                      </button>
-                      <button
-                        type="submit"
-                        disabled={!isCycleOpen}
-                        className="px-8 py-3 rounded-xl text-sm font-bold bg-[#FFC20E] text-neutral-950 hover:bg-[#e5ae0b] shadow-sm transition-all flex items-center gap-2"
-                      >
-                        <Check className="w-4 h-4 stroke-[3]" />
-                        <span>Submit Application</span>
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </>
-            )}
-
-            {isApplicationSubmitted && (
-              <div className="flex flex-col sm:flex-row items-center justify-between gap-4 p-5 bg-neutral-50 border border-neutral-300 rounded-2xl">
-                <div>
-                  <p className="font-bold text-sm text-neutral-950 flex items-center gap-2">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                    <span>Application Active ({activePerson.applicationCode || activePerson.personId})</span>
-                  </p>
-                  <p className="text-xs text-neutral-600 mt-0.5">
-                    Your applicant details and documents are editable. Click below to save any changes to your application.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={handleSaveDraft}
-                  className="w-full sm:w-auto px-8 py-3 rounded-xl text-sm font-bold bg-[#FFC20E] text-neutral-950 hover:bg-[#e5ae0b] shadow-sm transition-all flex items-center justify-center gap-2"
-                >
-                  <Save className="w-4 h-4 stroke-[2.5]" />
-                  <span>Save & Update Application</span>
-                </button>
-              </div>
-            )}
-          </div>
-        </form>
-    </div>
-  )
-}
-
-{/* 3. STATUS HISTORY VIEW */ }
-{
-  isApplicationSubmitted && activeTab === 'history' && (
-    <section className="bg-white border border-neutral-200 rounded-2xl p-6 sm:p-8 space-y-4 shadow-xs max-w-3xl">
-      <div className="border-b border-neutral-200 pb-3">
-        <h2 className="font-display text-lg font-bold text-neutral-950">
-          Pipeline Status History
-        </h2>
-        <p className="text-xs text-neutral-600">
-          Chronological progress of application and verification stages.
-        </p>
-      </div>
-
-      <ol className="space-y-3">
-        {pipelineHistory.length === 0 ? (
-          <li className="text-xs text-neutral-500 italic py-2">
-            No pipeline status entries recorded yet.
-          </li>
-        ) : (
-          pipelineHistory.map((item) => (
-            <li
-              key={item.eventId}
-              className="p-3.5 bg-neutral-50 border border-neutral-200 rounded-xl space-y-1.5"
-            >
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-xs font-bold text-neutral-950">
-                  {item.label}
-                </span>
-                <span className="text-[11px] font-mono tabular-nums text-neutral-500 shrink-0">
-                  seq #{item.seq}
-                </span>
-              </div>
-              <div className="flex flex-wrap items-center gap-2 text-[11px] text-neutral-600">
-                <Clock className="w-3 h-3 shrink-0" aria-hidden="true" />
-                <span className="font-mono tabular-nums">
-                  {format(new Date(item.occurredAt), 'dd MMM yyyy, HH:mm')}
-                </span>
-                <span aria-hidden="true">·</span>
-                <span>Actor: {item.actor}</span>
-              </div>
-              {item.note && (
-                <p className="text-xs text-neutral-700 bg-white p-2 rounded-lg border border-neutral-200 mt-1">
-                  {item.note}
+          {/* 3. STATUS HISTORY VIEW */}
+          {isApplicationSubmitted && activeTab === 'history' && (
+            <section className="bg-white border border-neutral-200 rounded-2xl p-6 sm:p-8 space-y-4 shadow-xs max-w-3xl">
+              <div className="border-b border-neutral-200 pb-3">
+                <h2 className="font-display text-lg font-bold text-neutral-950">
+                  Pipeline Status History
+                </h2>
+                <p className="text-xs text-neutral-600">
+                  Chronological progress of application and verification stages.
                 </p>
-              )}
-            </li>
-          ))
-        )}
-      </ol>
-    </section>
-  )
-}
+              </div>
+
+              <ol className="space-y-3">
+                {pipelineHistory.length === 0 ? (
+                  <li className="text-xs text-neutral-500 italic py-2">
+                    No pipeline status entries recorded yet.
+                  </li>
+                ) : (
+                  pipelineHistory.map((item) => (
+                    <li
+                      key={item.eventId}
+                      className="p-3.5 bg-neutral-50 border border-neutral-200 rounded-xl space-y-1.5"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-bold text-neutral-950">
+                          {item.label}
+                        </span>
+                        <span className="text-[11px] font-mono tabular-nums text-neutral-500 shrink-0">
+                          seq #{item.seq}
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2 text-[11px] text-neutral-600">
+                        <Clock className="w-3 h-3 shrink-0" aria-hidden="true" />
+                        <span className="font-mono tabular-nums">
+                          {format(new Date(item.occurredAt), 'dd MMM yyyy, HH:mm')}
+                        </span>
+                        <span aria-hidden="true">·</span>
+                        <span>Actor: {item.actor}</span>
+                      </div>
+                      {item.note && (
+                        <p className="text-xs text-neutral-700 bg-white p-2 rounded-lg border border-neutral-200 mt-1">
+                          {item.note}
+                        </p>
+                      )}
+                    </li>
+                  ))
+                )}
+              </ol>
+            </section>
+          )}
         </>
       )}
-    </div >
+
+      {/* Document Preview Modal */}
+      {previewDoc && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-fade-in"
+        >
+          <div className="bg-white rounded-2xl max-w-lg w-full border border-neutral-300 shadow-2xl overflow-hidden animate-scale-in">
+            <div className="p-5 border-b border-neutral-200 flex items-center justify-between bg-neutral-50">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-neutral-950 text-white flex items-center justify-center font-bold">
+                  <FileText className="w-4 h-4 text-[#FFC20E]" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-sm text-neutral-950">
+                    {previewDoc.label}
+                  </h3>
+                  <p className="text-xs text-neutral-500 font-mono truncate max-w-[240px]">
+                    {previewDoc.fileName}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPreviewDoc(null)}
+                className="p-1.5 rounded-lg text-neutral-400 hover:text-neutral-950 hover:bg-neutral-200/60 transition-colors cursor-pointer"
+                aria-label="Close preview"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4">
+              {previewDoc.fileName.toLowerCase().includes('demo') && (
+                <div className="p-3 bg-amber-50 border border-amber-300 rounded-xl flex items-center gap-2.5 text-xs text-amber-950">
+                  <Sparkles className="w-4 h-4 text-amber-600 shrink-0" />
+                  <div>
+                    <span className="font-bold uppercase tracking-wider text-[11px] bg-amber-200 text-amber-900 px-1.5 py-0.5 rounded mr-1.5">
+                      DEMO FILE
+                    </span>
+                    <span>Programmatically generated safe sample file for prototype demonstration.</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Document Visual Box */}
+              <div className="border border-neutral-200 rounded-xl p-8 bg-neutral-50 flex flex-col items-center justify-center text-center space-y-3 min-h-[180px]">
+                {previewDoc.fileName.toLowerCase().endsWith('.jpg') ||
+                previewDoc.fileName.toLowerCase().endsWith('.png') ||
+                previewDoc.fileName.toLowerCase().endsWith('.jpeg') ? (
+                  <div className="space-y-2">
+                    <div className="w-20 h-20 mx-auto rounded-xl bg-emerald-100 border border-emerald-300 flex items-center justify-center text-emerald-800">
+                      <FileCheck className="w-10 h-10" />
+                    </div>
+                    <p className="text-xs font-semibold text-neutral-800">
+                      Sample Residence Exterior Image Preview
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <div className="w-20 h-20 mx-auto rounded-xl bg-neutral-200 border border-neutral-300 flex items-center justify-center text-neutral-800">
+                      <FileText className="w-10 h-10 text-neutral-600" />
+                    </div>
+                    <p className="text-xs font-semibold text-neutral-800">
+                      Sample Verified PDF Document Preview
+                    </p>
+                  </div>
+                )}
+                <div className="text-[11px] text-neutral-500 font-mono space-y-0.5">
+                  <p>File: {previewDoc.fileName}</p>
+                  {previewDoc.fileSize && <p>Size: {formatBytes(previewDoc.fileSize)}</p>}
+                  <p>MIME: {previewDoc.fileType || 'application/pdf'}</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-4 bg-neutral-50 border-t border-neutral-200 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setPreviewDoc(null)}
+                className="px-4 py-2 rounded-xl text-xs font-semibold bg-neutral-950 text-white hover:bg-neutral-800 transition-colors cursor-pointer"
+              >
+                Close Preview
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
   );
 };

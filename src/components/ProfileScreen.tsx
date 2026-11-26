@@ -13,9 +13,15 @@ import {
   GraduationCap,
   Plus,
   ShieldCheck,
+  Sparkles,
   Upload,
   User,
 } from 'lucide-react';
+import {
+  generateDemoPersonalDetails,
+  generateDemoProfileAcademicDetails,
+  generateDemoCareerEntry,
+} from '../core/demoGenerator';
 import { normalizeCompanyName } from '../core/normalization';
 import type { AppendEventInput } from '../core/store';
 import type { AuthSessionUser, CareerSource, PersonProfile } from '../core/types';
@@ -65,6 +71,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
   const {
     register,
     handleSubmit,
+    setValue,
     formState: { errors, isSubmitting },
   } = useForm<ProfileFormValues>({
     resolver: zodResolver(profileSchema),
@@ -77,6 +84,29 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
       newPassword: '',
     },
   });
+
+  const handleUseDemoPersonalDetails = () => {
+    const demo = generateDemoPersonalDetails();
+    setValue('name', demo.fullName, { shouldValidate: true, shouldDirty: true });
+    setValue('email', demo.email, { shouldValidate: true, shouldDirty: true });
+    setValue('phone', demo.phone, { shouldValidate: true, shouldDirty: true });
+    showToast('Populated Personal Details with demo data. Click Save Profile Changes to apply.');
+  };
+
+  const handleUseDemoAcademicDetails = () => {
+    const demo = generateDemoProfileAcademicDetails();
+    setValue('college', demo.college, { shouldValidate: true, shouldDirty: true });
+    setValue('degree', demo.degree, { shouldValidate: true, shouldDirty: true });
+    showToast('Populated Academic Details with demo data. Click Save Profile Changes to apply.');
+  };
+
+  const handleUseDemoCareerDetails = () => {
+    const demo = generateDemoCareerEntry();
+    setCompanyInput(demo.company);
+    setRoleInput(demo.roleTitle);
+    setStartYearInput(String(demo.startYear));
+    showToast('Populated Career Entry with demo data. Click Append Career Event to save.');
+  };
 
   const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     setPhotoError('');
@@ -249,13 +279,23 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
 
       {/* Personal Details Form (All Roles) */}
       <section className="bg-white border border-neutral-200 rounded-2xl p-6 sm:p-8 space-y-6 shadow-xs">
-        <div className="border-b border-neutral-100 pb-3">
-          <h2 className="font-display text-lg font-bold text-neutral-950">
-            Personal Details
-          </h2>
-          <p className="text-xs text-neutral-500">
-            Updating your profile writes an append-only event to the log.
-          </p>
+        <div className="border-b border-neutral-100 pb-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <h2 className="font-display text-lg font-bold text-neutral-950">
+              Personal Details
+            </h2>
+            <p className="text-xs text-neutral-500">
+              Updating your profile writes an append-only event to the log.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={handleUseDemoPersonalDetails}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl border border-neutral-300 bg-white text-neutral-800 hover:bg-neutral-50 shadow-xs cursor-pointer self-start sm:self-auto"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-[#FFC20E]" />
+            <span>Use Demo Data</span>
+          </button>
         </div>
 
         <form onSubmit={handleSubmit(onProfileSubmit)} className="space-y-5">
@@ -315,6 +355,22 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
               {errors.phone && (
                 <p className="text-xs text-red-600">{errors.phone.message}</p>
               )}
+            </div>
+
+            {/* Academic Details Section Header */}
+            <div className="sm:col-span-2 pt-3 border-t border-neutral-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <p className="text-xs font-bold text-neutral-900">Academic Affiliation</p>
+                <p className="text-[11px] text-neutral-500">Institution and degree program details</p>
+              </div>
+              <button
+                type="button"
+                onClick={handleUseDemoAcademicDetails}
+                className="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-semibold rounded-lg border border-neutral-300 bg-white text-neutral-800 hover:bg-neutral-50 shadow-xs cursor-pointer self-start sm:self-auto"
+              >
+                <Sparkles className="w-3 h-3 text-[#FFC20E]" />
+                <span>Use Demo Data</span>
+              </button>
             </div>
 
             {/* College */}
@@ -495,9 +551,19 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
 
           {/* Add Career Entry Form */}
           <div className="pt-4 border-t border-neutral-100 space-y-4">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-neutral-400">
-              Add Career Entry
-            </h3>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-neutral-400">
+                Add Career Entry
+              </h3>
+              <button
+                type="button"
+                onClick={handleUseDemoCareerDetails}
+                className="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-semibold rounded-lg border border-neutral-300 bg-white text-neutral-800 hover:bg-neutral-50 shadow-xs cursor-pointer self-start sm:self-auto"
+              >
+                <Sparkles className="w-3 h-3 text-[#FFC20E]" />
+                <span>Use Demo Data</span>
+              </button>
+            </div>
 
             {careerError && (
               <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-red-900 text-xs font-medium">

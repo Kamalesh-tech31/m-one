@@ -17,6 +17,12 @@ import type {
   VolunteeringWork,
   WorkerBookmark,
 } from './types';
+import { DEFAULT_APPLICATION_ANSWERS } from './reducer';
+import {
+  getApplicantApplicationState,
+  getApplicantByCodeOrEmail,
+  verifyPassword,
+} from './applicantAuth';
 
 export const DEMO_ACCOUNTS: Record<UserRole, DemoCredentialAccount> = {
   applicant: {
@@ -185,48 +191,48 @@ export function verifyRoleCredentials(
 
   const account = DEMO_ACCOUNTS[portalRole];
 
-  // For applicant portal, allow registered email + Application Code login from prototype submissions
+  // For applicant portal, allow registered MAA Application Code or email login
   if (portalRole === 'applicant') {
-    try {
-      if (typeof window !== 'undefined' && window.localStorage) {
-        const stored = localStorage.getItem('maatram_submitted_applicants');
-        if (stored) {
-          const list = JSON.parse(stored);
-          const found = list.find(
-            (a: any) =>
-              a.email &&
-              a.email.toLowerCase() === email
-          );
-          if (
-            found &&
-            (password === account.password ||
-              password === 'Demo@123' ||
-              (found.applicationCode &&
-                password.trim().toUpperCase() ===
-                  found.applicationCode.trim().toUpperCase()))
-          ) {
-            return {
-              valid: true,
-              user: {
-                id: found.personId || `P-2026-${found.applicationCode.slice(-4)}`,
-                personId:
-                  found.personId || `P-2026-${found.applicationCode.slice(-4)}`,
-                role: 'applicant',
-                name: found.fullName || 'Registered Applicant',
-                email: found.email,
-                subtitle: `Application: ${found.applicationCode} · Verified`,
-              },
-            };
-          }
-        }
+    // 1. Look up by Application Code or Email in applicant accounts
+    const foundAcc = getApplicantByCodeOrEmail(email);
+    if (foundAcc) {
+      if (!foundAcc.emailVerified) {
+        return {
+          valid: false,
+          error: 'Your email address is not verified. Please complete verification before logging in.',
+        };
       }
-    } catch {
-      // Fall through to standard check
+
+      const passMatches =
+        verifyPassword(password, foundAcc.passwordHash) ||
+        password === 'Demo@123' ||
+        password.toUpperCase() === foundAcc.applicationCode.toUpperCase();
+
+      if (!passMatches) {
+        return {
+          valid: false,
+          error: 'Invalid password. Please check your password and try again.',
+        };
+      }
+
+      return {
+        valid: true,
+        user: {
+          id: foundAcc.personId,
+          personId: foundAcc.personId,
+          role: 'applicant',
+          name: foundAcc.fullName,
+          email: foundAcc.email,
+          subtitle: `Application Code: ${foundAcc.applicationCode} · Verified`,
+        },
+      };
     }
 
-    // Demo applicant signs in with registered email & password (or application code)
+    // 2. Demo applicant signs in with registered email & password (or application code)
     if (
-      email === account.email.toLowerCase() &&
+      (email === account.email.toLowerCase() ||
+        email === 'app-2026-07' ||
+        email === 'p-2026-07') &&
       (password === account.password ||
         password === 'Demo@123' ||
         password.toUpperCase() === 'APP-2026-07' ||
@@ -244,6 +250,11 @@ export function verifyRoleCredentials(
         },
       };
     }
+
+    return {
+      valid: false,
+      error: 'Invalid application code, email, or password. Please verify your credentials.',
+    };
   }
 
   if (email !== account.email.toLowerCase()) {
@@ -352,9 +363,90 @@ export function selectForUser(
   if (!user) return null;
 
   if (user.role === 'applicant') {
+    let ownProfile = state.persons[user.personId] || null;
+    const account = getApplicantByCodeOrEmail(user.personId) || (user.email ? getApplicantByCodeOrEmail(user.email) : null);
+    const appState = getApplicantApplicationState(user.personId, user.email);
+
+    if (!ownProfile) {
+      const personByEmail = Object.values(state.persons).find(
+        (p) => p.email && user.email && p.email.toLowerCase() === user.email.toLowerCase()
+      );
+      if (personByEmail) {
+        ownProfile = { ...personByEmail };
+      } else {
+        ownProfile = {
+          personId: user.personId,
+          cycleId: '2026',
+          name: account?.fullName || user.name || 'New Applicant',
+          roles: ['applicant'],
+          email: account?.email || user.email || '',
+          phone: account?.phone || '',
+          region: account?.district || 'Chennai',
+          stage: appState.stage || 'application',
+          status: appState.hasSubmitted ? 'applicant' : 'draft',
+          documents: appState.documents || [],
+          statusHistory: [],
+          verifiers: {
+            teleStatus: 'Pending',
+            physicalStatus: 'Pending',
+          },
+          applicationAnswers: {
+            ...DEFAULT_APPLICATION_ANSWERS,
+            fullName: account?.fullName || user.name || '',
+            phone: account?.phone || '',
+            dob: account?.dob || '',
+            ...appState.answers,
+          },
+        };
+      }
+    } else {
+      ownProfile = { ...ownProfile };
+    }
+
+    // Synchronize account identifiers and submission state
+    const effectiveFullName = account?.fullName || user.name || ownProfile.name || '';
+    ownProfile.name = effectiveFullName;
+
+    if (account) {
+      ownProfile.applicationCode = account.applicationCode;
+      ownProfile.email = account.email || ownProfile.email;
+      ownProfile.phone = account.phone || ownProfile.phone;
+      ownProfile.region = account.district || ownProfile.region;
+    }
+
+    if (appState.hasSubmitted) {
+      ownProfile.applicationSubmittedAt = appState.submittedAt;
+      ownProfile.status = 'applicant';
+      ownProfile.stage = appState.stage || ownProfile.stage || 'application';
+      if (appState.applicationCode) {
+        ownProfile.applicationCode = appState.applicationCode;
+      }
+      if (appState.answers && Object.keys(appState.answers).length > 0) {
+        ownProfile.applicationAnswers = { ...ownProfile.applicationAnswers, ...appState.answers };
+      }
+      if (appState.documents && appState.documents.length > 0) {
+        ownProfile.documents = appState.documents;
+      }
+    } else {
+      // Unsubmitted: explicitly clear applicationSubmittedAt to prevent unintended status routing
+      delete (ownProfile as any).applicationSubmittedAt;
+      ownProfile.status = 'draft';
+      ownProfile.stage = 'application';
+      if (appState.answers && Object.keys(appState.answers).length > 0) {
+        ownProfile.applicationAnswers = { ...ownProfile.applicationAnswers, ...appState.answers };
+      }
+      if (appState.documents && appState.documents.length > 0) {
+        ownProfile.documents = appState.documents;
+      }
+    }
+
+    if (!ownProfile.applicationAnswers.fullName) {
+      ownProfile.applicationAnswers.fullName = effectiveFullName;
+    }
+
     return {
       role: 'applicant',
-      ownProfile: state.persons[user.personId] || null,
+      ownProfile,
       activeCycle: state.cycles['2026'],
       nextSeq: state.nextSeq,
       eventCount: state.events.length,
@@ -368,13 +460,13 @@ export function selectForUser(
 
     const groupRosterCount = anchorId
       ? Object.values(state.persons).filter((p) => p.anchorId === anchorId)
-          .length
+        .length
       : 0;
 
     const groupAnnouncements = anchorId
       ? Object.values(state.announcements)
-          .filter((a) => a.anchorId === anchorId)
-          .sort((a, b) => Number(b.pinned) - Number(a.pinned))
+        .filter((a) => a.anchorId === anchorId)
+        .sort((a, b) => Number(b.pinned) - Number(a.pinned))
       : [];
 
     const groupMeetings = anchorId

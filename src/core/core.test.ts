@@ -29,7 +29,16 @@ import {
   verifyRoleCredentials,
 } from './scoping';
 import { buildSeedEvents } from './seed';
-import { createSafeDemoBlob, generateRandomApplicantData } from './demoGenerator';
+import {
+  createSafeDemoBlob,
+  createSafeDemoFile,
+  generateDemoEducationalDetails,
+  generateDemoFamilyDetails,
+  generateDemoFinancialDetails,
+  generateDemoPersonalDetails,
+  generateRandomApplicantData,
+  generateSampleRegistrationDetails,
+} from './demoGenerator';
 
 function makeEvent(
   partial: Partial<LifecycleEvent> & Pick<LifecycleEvent, 'id' | 'seq' | 'type' | 'personId'>
@@ -955,5 +964,162 @@ describe('Maatram One Follow-up 3 Manrope-Only Typography', () => {
     // 8. Distinct on repeated generation
     expect(first.answers.identityRef).not.toBe(second.answers.identityRef);
     expect(first.email).not.toBe(second.email);
+  });
+
+  it('provides independent section-wise demo data generation and registered account authentication', () => {
+    // 1. Personal details
+    const personal = generateDemoPersonalDetails();
+    expect(personal.fullName).toBeTruthy();
+    expect(personal.phone).toMatch(/^\d{10}$/);
+    expect(['Male', 'Female', 'Other']).toContain(personal.gender);
+    expect(personal.region).toBeTruthy();
+    expect(personal.identityRef).toMatch(/^MOCK-TN-2026-\d{4}$/);
+
+    // 2. Family details
+    const family = generateDemoFamilyDetails();
+    expect(family.fatherName).toBeTruthy();
+    expect(family.motherName).toBeTruthy();
+    expect(family.parentOccupation).toBeTruthy();
+    expect(['Rented', 'Own']).toContain(family.housingType);
+    expect(Number(family.familyMembersCount)).toBeGreaterThanOrEqual(3);
+
+    // 3. Educational details
+    const edu = generateDemoEducationalDetails('Chennai');
+    expect(edu.schoolName).toBeTruthy();
+    expect(['Government', 'Private']).toContain(edu.schoolType);
+    expect(edu.tenthMarks).toContain('/ 500');
+    expect(edu.twelfthMarks).toContain('/ 600');
+
+    // 4. Financial details
+    const fin = generateDemoFinancialDetails();
+    expect(fin.familyAnnualIncome).toBeTruthy();
+    expect(fin.incomeSource).toBeTruthy();
+    expect(fin.whyMaatram.length).toBeGreaterThanOrEqual(20);
+
+    // 5. Registration helper
+    const reg = generateSampleRegistrationDetails();
+    expect(reg.name).toBeTruthy();
+    expect(reg.email).toContain('@demo.local');
+    expect(reg.password).toBe('DemoApplicant@123');
+
+    // 6. Safe demo File generation
+    const sampleDocFile = createSafeDemoFile(
+      'income_certificate_demo.pdf',
+      'application/pdf',
+      'DEMO / SAMPLE · Income Certificate'
+    );
+    expect(sampleDocFile.name).toBe('income_certificate_demo.pdf');
+    expect(sampleDocFile.size).toBeGreaterThan(0);
+    expect(sampleDocFile.type).toBe('application/pdf');
+
+    // 7. Registered account verification in verifyRoleCredentials
+    const mockStorage: Record<string, string> = {};
+    (globalThis as any).localStorage = {
+      getItem: (k: string) => mockStorage[k] || null,
+      setItem: (k: string, v: string) => { mockStorage[k] = v; },
+      removeItem: (k: string) => { delete mockStorage[k]; },
+      clear: () => { Object.keys(mockStorage).forEach(k => delete mockStorage[k]); },
+    };
+
+    const registeredAccount = {
+      fullName: 'Vignesh K',
+      phone: '9840112233',
+      email: 'vignesh.k@registered.local',
+      district: 'Madurai',
+      password: 'MyCustomPassword!456',
+      registeredAt: new Date().toISOString(),
+    };
+    (globalThis as any).localStorage.setItem(
+      'maatram_registered_accounts',
+      JSON.stringify([registeredAccount])
+    );
+
+    const verifiedAuth = verifyRoleCredentials(
+      'applicant',
+      'vignesh.k@registered.local',
+      'MyCustomPassword!456'
+    );
+    expect(verifiedAuth.valid).toBe(true);
+    expect(verifiedAuth.user?.name).toBe('Vignesh K');
+    expect(verifiedAuth.user?.role).toBe('applicant');
+
+    // Wrong password should fail
+    const failedAuth = verifyRoleCredentials(
+      'applicant',
+      'vignesh.k@registered.local',
+      'WrongPassword'
+    );
+    expect(failedAuth.valid).toBe(false);
+
+    // Verify selectForUser synthesizes a clean new profile for new registered applicant
+    const stateForTest = foldEvents(buildSeedEvents());
+    const scopedUser = selectForUser(
+      stateForTest,
+      verifiedAuth.user!
+    ) as any;
+    expect(scopedUser).not.toBeNull();
+    expect(scopedUser.ownProfile).not.toBeNull();
+    expect(scopedUser.ownProfile.personId).toBe(verifiedAuth.user!.personId);
+    expect(scopedUser.ownProfile.applicationSubmittedAt).toBeUndefined();
+    expect(scopedUser.ownProfile.applicationAnswers.fullName).toBe('Vignesh K');
+  });
+
+  it('preserves application answers across draft save and document uploads', () => {
+    const personId = 'P-REG-TEST-001';
+    let state = foldEvents(buildSeedEvents());
+
+    // 1. Save draft answers
+    const draftEvent = {
+      id: 'EVT-DRAFT-1',
+      type: 'APPLICATION_DRAFT_SAVED' as const,
+      personId,
+      cycleId: '2026',
+      occurredAt: new Date().toISOString(),
+      recordedAt: new Date().toISOString(),
+      actor: 'Test Student',
+      seq: state.nextSeq,
+      payload: {
+        email: 'test@student.demo',
+        region: 'Chennai',
+        phone: '9840199999',
+        answers: {
+          fullName: 'Test Student',
+          schoolName: 'Govt Model Higher Secondary School',
+          tenthMarks: '480 / 500 (96.0%)',
+          twelfthMarks: '580 / 600 (96.7%)',
+          familyAnnualIncome: 'Rs 85,000',
+        },
+      },
+    };
+    state = applyEvent(state, draftEvent);
+    expect(state.persons[personId].applicationAnswers.fullName).toBe('Test Student');
+    expect(state.persons[personId].applicationAnswers.tenthMarks).toBe('480 / 500 (96.0%)');
+
+    // 2. Upload document
+    const uploadEvent = {
+      id: 'EVT-UPLOAD-1',
+      type: 'DOCUMENT_UPLOADED' as const,
+      personId,
+      cycleId: '2026',
+      occurredAt: new Date().toISOString(),
+      recordedAt: new Date().toISOString(),
+      actor: 'Test Student',
+      seq: state.nextSeq,
+      payload: {
+        docId: 'DOC-1',
+        label: 'Income Certificate',
+        fileName: 'income_certificate_demo.pdf',
+        fileType: 'application/pdf',
+        fileSize: 124000,
+        signedUrl: 'https://signed.maatram.local/docs/income_certificate_demo.pdf',
+      },
+    };
+    state = applyEvent(state, uploadEvent);
+
+    // Answers must remain 100% intact after document upload!
+    expect(state.persons[personId].applicationAnswers.fullName).toBe('Test Student');
+    expect(state.persons[personId].applicationAnswers.tenthMarks).toBe('480 / 500 (96.0%)');
+    expect(state.persons[personId].documents).toHaveLength(1);
+    expect(state.persons[personId].documents[0].label).toBe('Income Certificate');
   });
 });

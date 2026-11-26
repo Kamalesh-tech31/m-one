@@ -89,38 +89,22 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
   const [otpInput, setOtpInput] = useState('');
   const [otpError, setOtpError] = useState('');
 
-  // Applicant 2-step verification: Enter generated code
-  const [applicantAwaitingCode, setApplicantAwaitingCode] = useState(false);
-  const [pendingApplicantUser, setPendingApplicantUser] = useState<AuthSessionUser | null>(null);
-  const [expectedApplicantCode, setExpectedApplicantCode] = useState<string>('APP-2026-07');
-  const [applicantCodeInput, setApplicantCodeInput] = useState('');
-  const [applicantCodeError, setApplicantCodeError] = useState('');
-
-  // Recent applicant from prototype localStorage
-  const [recentApplicant, setRecentApplicant] = useState<{
-    email: string;
-    applicationCode: string;
-  } | null>(null);
-
+  // Prefill registered code or email
   React.useEffect(() => {
     try {
-      const raw = localStorage.getItem('maatram_submitted_applicants');
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          const last = parsed[parsed.length - 1];
-          if (last.email && last.applicationCode) {
-            setRecentApplicant({
-              email: last.email,
-              applicationCode: last.applicationCode,
-            });
-          }
+      if (selectedRole === 'applicant') {
+        const lastRegCode = localStorage.getItem('maatram_last_registered_code');
+        const lastRegEmail = localStorage.getItem('maatram_last_registered_email');
+        if (lastRegCode) {
+          setEmail(lastRegCode);
+        } else if (lastRegEmail) {
+          setEmail(lastRegEmail);
         }
       }
     } catch {
       // ignore
     }
-  }, []);
+  }, [selectedRole]);
 
   const currentRoleConfig = selectedRole
     ? ROLES_LIST.find((r) => r.role === selectedRole)
@@ -141,45 +125,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
 
     const result = verifyRoleCredentials(selectedRole, email, password);
     if (!result.valid || !result.user) {
-      setErrorMsg(result.error || 'Invalid email or password.');
-      return;
-    }
-
-    // Applicant role: user signs in with the generated code
-    if (selectedRole === 'applicant') {
-      let code = 'APP-2026-07';
-      try {
-        const stored = localStorage.getItem('maatram_submitted_applicants');
-        if (stored) {
-          const list = JSON.parse(stored);
-          const found = list.find(
-            (a: any) =>
-              a.email && a.email.toLowerCase() === email.trim().toLowerCase()
-          );
-          if (found && found.applicationCode) {
-            code = found.applicationCode;
-          }
-        }
-      } catch {
-        // fallback
-      }
-
-      // If applicant signed in with the generated code directly as password, log in immediately!
-      const passClean = password.trim().toUpperCase();
-      if (
-        passClean === code.trim().toUpperCase() ||
-        passClean === 'APP-2026-07' ||
-        passClean === 'P-2026-07'
-      ) {
-        onLogin(result.user);
-        return;
-      }
-
-      setPendingApplicantUser(result.user);
-      setExpectedApplicantCode(code);
-      setApplicantAwaitingCode(true);
-      setApplicantCodeInput('');
-      setApplicantCodeError('');
+      setErrorMsg(result.error || 'Invalid credentials.');
       return;
     }
 
@@ -210,8 +156,10 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
       inputCode === expected ||
       inputCode === 'APP-2026-07' ||
       inputCode === 'P-2026-07' ||
+      inputCode.startsWith('MAA-2026-') ||
       (expected && inputCode === expected.replace('APP-', 'P-')) ||
-      (expected && inputCode === expected.replace('P-', 'APP-'));
+      (expected && inputCode === expected.replace('P-', 'APP-')) ||
+      (expected && inputCode === expected.replace('MAA-', 'APP-'));
 
     if (!isValid) {
       setApplicantCodeError(
@@ -371,75 +319,18 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
           {/* Header */}
           <div className="space-y-1">
             <h1 className="font-display text-2xl font-extrabold tracking-tight text-neutral-950">
-              {applicantAwaitingCode
-                ? 'Enter Generated Code'
-                : adminAwaitingOtp
-                  ? 'Admin Verification Code'
-                  : roleTitle}
+              {adminAwaitingOtp ? 'Admin Verification Code' : roleTitle}
             </h1>
             <p className="text-xs text-neutral-500">
-              {applicantAwaitingCode
-                ? 'Enter your generated Application Code to view your application status.'
-                : adminAwaitingOtp
-                  ? 'Enter the 6-digit one-time code to confirm your administrative access.'
+              {adminAwaitingOtp
+                ? 'Enter the 6-digit one-time code to confirm your administrative access.'
+                : selectedRole === 'applicant'
+                  ? 'Sign in with your MAA Application Code or registered email to continue or track your application.'
                   : `Enter your credentials to access the ${currentRoleConfig?.title.toLowerCase()} portal.`}
             </p>
           </div>
 
-          {/* Applicant Generated Code Step: Only then can they view the status */}
-          {applicantAwaitingCode ? (
-            <form onSubmit={handleVerifyApplicantCode} className="space-y-4">
-              <div className="space-y-1.5">
-                <label
-                  htmlFor="applicant-code-input"
-                  className="block text-xs font-bold text-neutral-900"
-                >
-                  Generated Application Code
-                </label>
-                <input
-                  id="applicant-code-input"
-                  type="text"
-                  value={applicantCodeInput}
-                  onChange={(e) => {
-                    setApplicantCodeInput(e.target.value);
-                    setApplicantCodeError('');
-                  }}
-                  placeholder={expectedApplicantCode || 'APP-2026-07'}
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-neutral-300 focus:outline-none focus:border-neutral-950 font-mono text-center tracking-widest text-base font-bold uppercase"
-                  autoFocus
-                />
-                <p className="text-[11px] text-neutral-400">
-                  Demo hint: Enter generated code{' '}
-                  <span className="font-mono font-bold text-neutral-700">
-                    {expectedApplicantCode || 'APP-2026-07'}
-                  </span>{' '}
-                  to view status
-                </p>
-              </div>
-
-              {applicantCodeError && (
-                <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-red-900 text-xs font-medium">
-                  {applicantCodeError}
-                </div>
-              )}
-
-              <button
-                type="submit"
-                className="w-full flex items-center justify-center gap-2 px-5 py-3 rounded-xl font-bold text-sm bg-[#FFC20E] text-neutral-950 hover:bg-[#e5ae0b] transition-colors"
-              >
-                <span>Verify & View Status</span>
-                <ArrowRight className="w-4 h-4" />
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setApplicantAwaitingCode(false)}
-                className="w-full text-center text-xs font-semibold text-neutral-500 hover:text-neutral-950"
-              >
-                Change login credentials
-              </button>
-            </form>
-          ) : adminAwaitingOtp ? (
+          {adminAwaitingOtp ? (
             <form onSubmit={handleVerifyOtp} className="space-y-4">
               <div className="space-y-1.5">
                 <label
@@ -474,7 +365,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
 
               <button
                 type="submit"
-                className="w-full flex items-center justify-center gap-2 px-5 py-3 rounded-xl font-bold text-sm bg-[#FFC20E] text-neutral-950 hover:bg-[#e5ae0b] transition-colors"
+                className="w-full flex items-center justify-center gap-2 px-5 py-3 rounded-xl font-bold text-sm bg-[#FFC20E] text-neutral-950 hover:bg-[#e5ae0b] transition-colors cursor-pointer"
               >
                 <span>Verify & Sign in</span>
                 <ArrowRight className="w-4 h-4" />
@@ -483,32 +374,38 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
               <button
                 type="button"
                 onClick={() => setAdminAwaitingOtp(false)}
-                className="w-full text-center text-xs font-semibold text-neutral-500 hover:text-neutral-950"
+                className="w-full text-center text-xs font-semibold text-neutral-500 hover:text-neutral-950 cursor-pointer"
               >
                 Change login credentials
               </button>
             </form>
           ) : (
-            /* Regular Credentials Form - Unaltered */
+            /* Regular Credentials Form */
             <form onSubmit={handleSignIn} className="space-y-4">
               <div className="space-y-1.5">
                 <label
                   htmlFor="login-email"
                   className="block text-xs font-bold text-neutral-900"
                 >
-                  Email Address
+                  {selectedRole === 'applicant'
+                    ? 'MAA Application Code or Registered Email'
+                    : 'Email Address'}
                 </label>
                 <input
                   id="login-email"
-                  type="email"
-                  autoComplete="email"
+                  type={selectedRole === 'applicant' ? 'text' : 'email'}
+                  autoComplete={selectedRole === 'applicant' ? 'username' : 'email'}
                   value={email}
                   onChange={(e) => {
                     setEmail(e.target.value);
                     setErrorMsg('');
                   }}
-                  placeholder={`e.g. ${demoAccountInfo.email}`}
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-neutral-300 focus:outline-none focus:border-neutral-950 text-sm"
+                  placeholder={
+                    selectedRole === 'applicant'
+                      ? 'e.g. MAA-2026-7925 or applicant@demo.local'
+                      : `e.g. ${demoAccountInfo.email}`
+                  }
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-neutral-300 focus:outline-none focus:border-neutral-950 text-sm font-medium"
                   required
                 />
               </div>
@@ -567,13 +464,12 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
               {/* Applicant page specific: "New here? Create account" */}
               {selectedRole === 'applicant' && (
                 <div className="text-center pt-2">
-                  <button
-                    type="button"
-                    onClick={onStartPublicApplication}
+                  <Link
+                    to="/register"
                     className="text-xs font-semibold text-neutral-700 hover:text-neutral-950 underline underline-offset-2"
                   >
                     New here? Create account
-                  </button>
+                  </Link>
                 </div>
               )}
 
