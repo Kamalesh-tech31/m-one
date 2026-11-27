@@ -7,6 +7,7 @@ import {
   ArrowRight,
   Check,
   CheckCircle2,
+  ChevronLeft,
   Clock,
   Copy,
   Edit3,
@@ -46,17 +47,25 @@ import {
   validateUploadFile,
 } from '../core/validation';
 import {
+  getApplicantApplication,
   saveDraftApplication,
   submitApplicantApplication,
   updateApplicantApplication,
 } from '../core/applicantAuth';
 
-export type ApplicantTab = 'application' | 'form' | 'history';
+export type ApplicantTab =
+  | 'application'
+  | 'form'
+  | 'history'
+  | 'edit'
+  | 'apply-now'
+  | 'resume';
 
 interface ApplicantScreenProps {
   scoped: ApplicantScopedView;
   actorName: string;
   activeTab?: ApplicantTab;
+  targetSection?: string;
   onUpdateSessionName: (name: string) => void;
   onAppend: (input: AppendEventInput) => void;
   showToast: (msg: string) => void;
@@ -98,6 +107,7 @@ export const ApplicantScreen: React.FC<ApplicantScreenProps> = ({
   scoped,
   actorName,
   activeTab = 'application',
+  targetSection,
   onUpdateSessionName,
   onAppend,
   showToast,
@@ -117,6 +127,37 @@ export const ApplicantScreen: React.FC<ApplicantScreenProps> = ({
   const [activeUploadLabel, setActiveUploadLabel] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string>('');
 
+  const navigate = useNavigate();
+
+  // Scroll to targeted section when navigating to edit specific section
+  useEffect(() => {
+    const sec =
+      targetSection ||
+      new URLSearchParams(window.location.search).get('section');
+    if (sec && (activeTab === 'edit' || activeTab === 'form')) {
+      const normalized = sec.toLowerCase();
+      const elId =
+        normalized === 'personal'
+          ? 'section-personal'
+          : normalized === 'family'
+          ? 'section-family'
+          : normalized === 'educational' || normalized === 'education'
+          ? 'section-educational'
+          : normalized === 'financial'
+          ? 'section-financial'
+          : normalized === 'documents' || normalized === 'supporting-documents'
+          ? 'section-documents'
+          : `section-${normalized}`;
+
+      const el = document.getElementById(elId);
+      if (el) {
+        setTimeout(() => {
+          el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }, 150);
+      }
+    }
+  }, [targetSection, activeTab]);
+
   // Simulated OTP state (frontend demonstration only)
   const [otpSent, setOtpSent] = useState(false);
   const [demoOtpCode, setDemoOtpCode] = useState('842106');
@@ -130,7 +171,6 @@ export const ApplicantScreen: React.FC<ApplicantScreenProps> = ({
     'live' | 'applied' | 'tele_verification' | 'physical_verification' | 'selection_board' | 'selected' | 'rejected'
   >('live');
 
-  const navigate = useNavigate();
   const logoutUser = useMaatramStore((s) => s.logoutUser);
 
   // Post-submission workflow state:
@@ -192,11 +232,24 @@ export const ApplicantScreen: React.FC<ApplicantScreenProps> = ({
 
   const isApplicationSubmitted = Boolean(activePerson?.applicationSubmittedAt);
 
+  const appRecord = useMemo(() => {
+    return getApplicantApplication(
+      activePerson?.applicationCode || activePerson?.personId || '',
+      activePerson?.email
+    );
+  }, [activePerson?.applicationCode, activePerson?.personId, activePerson?.email]);
+
   const lastLoadedPersonIdRef = useRef<string | null>(null);
+  const prevTabRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (activePerson) {
-      if (lastLoadedPersonIdRef.current !== activePerson.personId) {
+      const isNewPerson = lastLoadedPersonIdRef.current !== activePerson.personId;
+      const isEnteringForm =
+        (activeTab === 'edit' || activeTab === 'form') && prevTabRef.current !== activeTab;
+      prevTabRef.current = activeTab;
+
+      if (isNewPerson || isEnteringForm) {
         lastLoadedPersonIdRef.current = activePerson.personId;
         reset(activePerson.applicationAnswers);
         setEmail(activePerson.email);
@@ -210,7 +263,7 @@ export const ApplicantScreen: React.FC<ApplicantScreenProps> = ({
         }
       }
     }
-  }, [activePerson, reset]);
+  }, [activePerson, activeTab, reset]);
 
   if (!activePerson) {
     return (
@@ -395,7 +448,13 @@ export const ApplicantScreen: React.FC<ApplicantScreenProps> = ({
 
     // Save draft or update existing submission in applicantAuth storage
     if (isApplicationSubmitted) {
-      updateApplicantApplication(targetPersonId, values, uploadedDocs);
+      updateApplicantApplication(
+        targetPersonId,
+        values,
+        uploadedDocs,
+        email,
+        activePerson.applicationCode
+      );
     } else {
       saveDraftApplication(targetPersonId, email, values, uploadedDocs);
     }
@@ -431,6 +490,10 @@ export const ApplicantScreen: React.FC<ApplicantScreenProps> = ({
         ? 'Application details updated successfully.'
         : 'Draft saved successfully.'
     );
+
+    if (isApplicationSubmitted) {
+      navigate('/applicant/application');
+    }
   };
 
   const runSimulatedSignedUpload = (
@@ -467,22 +530,43 @@ export const ApplicantScreen: React.FC<ApplicantScreenProps> = ({
             },
           });
 
+          const newDoc = {
+            docId: `DOC-${Date.now().toString(36).toUpperCase()}`,
+            label: labelToUse,
+            fileName: file.name,
+            fileType: file.type || 'application/pdf',
+            fileSize: file.size,
+            signedUrl: `https://signed.maatram.local/docs/${encodeURIComponent(
+              file.name
+            )}`,
+            uploadedAt: new Date().toISOString(),
+          };
+
           onAppend({
             type: 'DOCUMENT_UPLOADED',
             personId: targetPersonId,
             cycleId: '2026',
             actor: actorName,
-            payload: {
-              docId: `DOC-${Date.now().toString(36).toUpperCase()}`,
-              label: labelToUse,
-              fileName: file.name,
-              fileType: file.type || 'application/pdf',
-              fileSize: file.size,
-              signedUrl: `https://signed.maatram.local/docs/${encodeURIComponent(
-                file.name
-              )}`,
-            },
+            payload: newDoc,
           });
+
+          const nextDocs = [
+            ...uploadedDocs.filter((d) => d.label !== labelToUse),
+            newDoc,
+          ];
+
+          if (isApplicationSubmitted) {
+            updateApplicantApplication(
+              targetPersonId,
+              currentAnswers,
+              nextDocs,
+              email,
+              activePerson.applicationCode
+            );
+          } else {
+            saveDraftApplication(targetPersonId, email, currentAnswers, nextDocs);
+          }
+
           showToast(`Uploaded ${labelToUse} (${file.name}).`);
           window.setTimeout(() => {
             setUploadProgress(null);
@@ -770,11 +854,17 @@ export const ApplicantScreen: React.FC<ApplicantScreenProps> = ({
             <h1 className="font-display font-extrabold text-2xl sm:text-3xl tracking-tight text-neutral-950">
               {submissionStage !== 'idle'
                 ? 'Application Submission'
-                : !isApplicationSubmitted || activeTab === 'form'
-                  ? 'Scholarship Application'
-                  : activeTab === 'application'
-                    ? 'Application Status'
-                    : 'Pipeline Status History'}
+                : activeTab === 'apply-now'
+                  ? 'Apply for Scholarship'
+                  : activeTab === 'resume'
+                    ? 'Resume Application'
+                    : activeTab === 'edit'
+                      ? 'Edit Application'
+                      : !isApplicationSubmitted || activeTab === 'form'
+                        ? 'Scholarship Application'
+                        : activeTab === 'application'
+                          ? 'Application Status'
+                          : 'Pipeline Status History'}
             </h1>
             {isApplicationSubmitted && activePerson.applicationCode && (
               <span className="bg-neutral-950 text-white rounded-full px-3 py-0.5 text-xs font-mono font-bold tracking-tight">
@@ -785,13 +875,19 @@ export const ApplicantScreen: React.FC<ApplicantScreenProps> = ({
           <p className="text-xs sm:text-sm text-neutral-600 mt-1">
             {submissionStage !== 'idle'
               ? 'Application recorded. Generate and copy your unique code to return to login and view status.'
-              : !isApplicationSubmitted
-                ? 'Complete personal, family, educational, financial details and document uploads in one unified submission.'
-                : activeTab === 'form'
-                  ? 'Your submitted application is editable. Update your personal, family, educational, financial details or documents anytime.'
-                  : activeTab === 'application'
-                    ? `Cycle 2026–27 · Deadline: ${deadlineFormatted} (${isCycleOpen ? 'Open' : 'Closed'})`
-                    : 'Chronological timeline of application and verification stage progress.'}
+              : activeTab === 'apply-now'
+                ? 'Start your Higher Education Scholarship 2026–27 application.'
+                : activeTab === 'resume'
+                  ? 'Continue your saved application draft and submit for verification.'
+                  : activeTab === 'edit'
+                    ? 'Your submitted application is editable. Update your personal, family, educational, financial details or documents anytime.'
+                    : !isApplicationSubmitted
+                    ? 'Complete personal, family, educational, financial details and document uploads in one unified submission.'
+                    : activeTab === 'form'
+                      ? 'Your submitted application is editable. Update your personal, family, educational, financial details or documents anytime.'
+                      : activeTab === 'application'
+                        ? `Cycle 2026–27 · Deadline: ${deadlineFormatted} (${isCycleOpen ? 'Open' : 'Closed'})`
+                        : 'Chronological timeline of application and verification stage progress.'}
           </p>
         </div>
       </div>
@@ -902,6 +998,102 @@ export const ApplicantScreen: React.FC<ApplicantScreenProps> = ({
 
       {submissionStage === 'idle' && (
         <>
+          {/* APPLY NOW VIEW: For applicants who have registered an account but not submitted */}
+          {(activeTab === 'apply-now' ||
+            (activeTab === 'application' && !isApplicationSubmitted && !appRecord)) && (
+            <div className="max-w-2xl mx-auto py-6 sm:py-10">
+              <div className="bg-white border-2 border-neutral-200 rounded-3xl p-8 sm:p-10 shadow-xs text-center space-y-6">
+                <div className="w-16 h-16 rounded-2xl bg-amber-100 text-amber-900 mx-auto flex items-center justify-center">
+                  <FileText className="w-8 h-8 text-amber-600" />
+                </div>
+
+                <div className="space-y-2.5">
+                  <span className="inline-block px-3 py-1 rounded-full text-xs font-mono font-bold bg-neutral-100 text-neutral-800 border border-neutral-200">
+                    {activePerson.applicationCode || 'MAA-2026'}
+                  </span>
+                  <h2 className="font-display font-extrabold text-2xl sm:text-3xl tracking-tight text-neutral-950">
+                    You haven't submitted your application yet!
+                  </h2>
+                  <p className="text-sm text-neutral-600 max-w-lg mx-auto leading-relaxed">
+                    Your account has been successfully created. Complete your scholarship application to start tracking your application status.
+                  </p>
+                </div>
+
+                {/* Account details summary */}
+                <div className="p-4 bg-neutral-50 border border-neutral-200 rounded-2xl text-left text-xs space-y-2 max-w-md mx-auto">
+                  <div className="flex justify-between items-center pb-2 border-b border-neutral-200">
+                    <span className="text-neutral-500">Applicant:</span>
+                    <span className="font-bold text-neutral-900">{activePerson.name}</span>
+                  </div>
+                  <div className="flex justify-between items-center pb-2 border-b border-neutral-200">
+                    <span className="text-neutral-500">Registered Email:</span>
+                    <span className="font-mono text-neutral-900">{activePerson.email}</span>
+                  </div>
+                  <div className="flex justify-between items-center pb-2 border-b border-neutral-200">
+                    <span className="text-neutral-500">Registered Phone:</span>
+                    <span className="font-mono text-neutral-900">{activePerson.phone}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-neutral-500">District:</span>
+                    <span className="font-medium text-neutral-900">{activePerson.region || 'Tamil Nadu'}</span>
+                  </div>
+                </div>
+
+                <div className="pt-2">
+                  <button
+                    type="button"
+                    onClick={() => navigate('/applicant/form')}
+                    className="inline-flex items-center justify-center gap-2 px-8 py-3.5 rounded-xl font-bold text-sm bg-[#FFC20E] text-neutral-950 hover:bg-[#e5ae0b] transition-colors shadow-xs cursor-pointer"
+                  >
+                    <span>Apply Now</span>
+                    <ArrowRight className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* RESUME APPLICATION VIEW: For applicants with an incomplete draft */}
+          {(activeTab === 'resume' ||
+            (activeTab === 'application' && !isApplicationSubmitted && appRecord?.status === 'DRAFT')) && (
+            <div className="max-w-2xl mx-auto py-6 sm:py-10">
+              <div className="bg-white border-2 border-neutral-200 rounded-3xl p-8 sm:p-10 shadow-xs text-center space-y-6">
+                <div className="w-16 h-16 rounded-2xl bg-amber-50 text-amber-900 mx-auto flex items-center justify-center border border-amber-200">
+                  <Clock className="w-8 h-8 text-amber-600" />
+                </div>
+
+                <div className="space-y-2.5">
+                  <span className="inline-block px-3 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-900 border border-amber-200">
+                    Draft In Progress
+                  </span>
+                  <h2 className="font-display font-extrabold text-2xl sm:text-3xl tracking-tight text-neutral-950">
+                    Resume Your Scholarship Application
+                  </h2>
+                  <p className="text-sm text-neutral-600 max-w-lg mx-auto leading-relaxed">
+                    You have an incomplete application draft in progress. Pick up where you left off and submit your application to start tracking your application status.
+                  </p>
+                </div>
+
+                {appRecord?.lastSavedAt && (
+                  <p className="text-xs text-neutral-400">
+                    Last saved: {new Date(appRecord.lastSavedAt).toLocaleString()}
+                  </p>
+                )}
+
+                <div className="pt-2">
+                  <button
+                    type="button"
+                    onClick={() => navigate('/applicant/form')}
+                    className="inline-flex items-center justify-center gap-2 px-8 py-3.5 rounded-xl font-bold text-sm bg-[#FFC20E] text-neutral-950 hover:bg-[#e5ae0b] transition-colors shadow-xs cursor-pointer"
+                  >
+                    <span>Resume Application</span>
+                    <ArrowRight className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* 1. APPLICATION VIEW: Stepper, Join Code, Verifiers */}
           {isApplicationSubmitted && activeTab === 'application' && (
             <div className="space-y-6">
@@ -937,7 +1129,7 @@ export const ApplicantScreen: React.FC<ApplicantScreenProps> = ({
                     </button>
                     <button
                       type="button"
-                      onClick={() => navigate('/applicant/form')}
+                      onClick={() => navigate('/applicant/edit')}
                       className="px-3 py-1 rounded-full text-xs font-bold bg-[#FFC20E] text-neutral-950 hover:bg-[#e5ae0b] transition-colors cursor-pointer"
                     >
                       Edit Application
@@ -1281,8 +1473,8 @@ export const ApplicantScreen: React.FC<ApplicantScreenProps> = ({
                   </div>
                   <button
                     type="button"
-                    onClick={() => navigate('/applicant/form')}
-                    className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold bg-[#FFC20E] text-neutral-950 hover:bg-[#e5ae0b] transition-colors shadow-xs self-start sm:self-auto"
+                    onClick={() => navigate('/applicant/edit')}
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold bg-[#FFC20E] text-neutral-950 hover:bg-[#e5ae0b] transition-colors shadow-xs self-start sm:self-auto cursor-pointer"
                   >
                     <Edit3 className="w-4 h-4" />
                     <span>Edit Application Details</span>
@@ -1298,8 +1490,8 @@ export const ApplicantScreen: React.FC<ApplicantScreenProps> = ({
                       </span>
                       <button
                         type="button"
-                        onClick={() => navigate('/applicant/form')}
-                        className="text-[11px] font-semibold text-neutral-700 hover:text-neutral-950 underline inline-flex items-center gap-1"
+                        onClick={() => navigate('/applicant/edit/personal')}
+                        className="text-[11px] font-semibold text-neutral-700 hover:text-neutral-950 underline inline-flex items-center gap-1 cursor-pointer"
                       >
                         <Edit3 className="w-3 h-3" /> Edit
                       </button>
@@ -1343,8 +1535,8 @@ export const ApplicantScreen: React.FC<ApplicantScreenProps> = ({
                       </span>
                       <button
                         type="button"
-                        onClick={() => navigate('/applicant/form')}
-                        className="text-[11px] font-semibold text-neutral-700 hover:text-neutral-950 underline inline-flex items-center gap-1"
+                        onClick={() => navigate('/applicant/edit/family')}
+                        className="text-[11px] font-semibold text-neutral-700 hover:text-neutral-950 underline inline-flex items-center gap-1 cursor-pointer"
                       >
                         <Edit3 className="w-3 h-3" /> Edit
                       </button>
@@ -1381,8 +1573,8 @@ export const ApplicantScreen: React.FC<ApplicantScreenProps> = ({
                       </span>
                       <button
                         type="button"
-                        onClick={() => navigate('/applicant/form')}
-                        className="text-[11px] font-semibold text-neutral-700 hover:text-neutral-950 underline inline-flex items-center gap-1"
+                        onClick={() => navigate('/applicant/edit/educational')}
+                        className="text-[11px] font-semibold text-neutral-700 hover:text-neutral-950 underline inline-flex items-center gap-1 cursor-pointer"
                       >
                         <Edit3 className="w-3 h-3" /> Edit
                       </button>
@@ -1417,8 +1609,8 @@ export const ApplicantScreen: React.FC<ApplicantScreenProps> = ({
                       </span>
                       <button
                         type="button"
-                        onClick={() => navigate('/applicant/form')}
-                        className="text-[11px] font-semibold text-neutral-700 hover:text-neutral-950 underline inline-flex items-center gap-1"
+                        onClick={() => navigate('/applicant/edit/financial')}
+                        className="text-[11px] font-semibold text-neutral-700 hover:text-neutral-950 underline inline-flex items-center gap-1 cursor-pointer"
                       >
                         <Edit3 className="w-3 h-3" /> Edit
                       </button>
@@ -1455,8 +1647,8 @@ export const ApplicantScreen: React.FC<ApplicantScreenProps> = ({
                     </div>
                     <button
                       type="button"
-                      onClick={() => navigate('/applicant/form')}
-                      className="text-xs font-bold text-neutral-900 hover:underline inline-flex items-center gap-1"
+                      onClick={() => navigate('/applicant/edit/documents')}
+                      className="text-xs font-bold text-neutral-900 hover:underline inline-flex items-center gap-1 cursor-pointer"
                     >
                       <Edit3 className="w-3.5 h-3.5" />
                       <span>Edit / Replace Documents</span>
@@ -1537,7 +1729,7 @@ export const ApplicantScreen: React.FC<ApplicantScreenProps> = ({
           )}
 
           {/* 2. FORM VIEW: Single Combined Application Process */}
-          {(!isApplicationSubmitted || activeTab === 'form') && (
+          {(!isApplicationSubmitted || activeTab === 'form' || activeTab === 'edit') && (
             <div className="space-y-6 max-w-4xl">
               {/* Editable Application Review Banner when submitted */}
               {isApplicationSubmitted && (
@@ -1564,9 +1756,10 @@ export const ApplicantScreen: React.FC<ApplicantScreenProps> = ({
                     <button
                       type="button"
                       onClick={() => navigate('/applicant/application')}
-                      className="px-4 py-2.5 rounded-xl font-semibold text-xs bg-neutral-800 text-white hover:bg-neutral-700 transition-colors whitespace-nowrap cursor-pointer"
+                      className="px-4 py-2.5 rounded-xl font-semibold text-xs bg-neutral-800 text-white hover:bg-neutral-700 transition-colors whitespace-nowrap cursor-pointer inline-flex items-center gap-1.5"
                     >
-                      Status Pipeline
+                      <ChevronLeft className="w-4 h-4" />
+                      <span>Back to Application</span>
                     </button>
                     <button
                       type="button"
@@ -1649,7 +1842,7 @@ export const ApplicantScreen: React.FC<ApplicantScreenProps> = ({
                 className="bg-white border border-neutral-200 rounded-2xl p-6 sm:p-8 space-y-8 shadow-xs"
               >
                 {/* SECTION 1: Personal Details */}
-                <div className="space-y-4">
+                <div id="section-personal" className="space-y-4 scroll-mt-6">
                   <div className="border-b border-neutral-200 pb-2 flex items-center justify-between">
                     <div>
                       <h3 className="font-display text-base font-bold text-neutral-950">
@@ -1785,7 +1978,7 @@ export const ApplicantScreen: React.FC<ApplicantScreenProps> = ({
                 </div>
 
                 {/* SECTION 2: Family Details */}
-                <div className="space-y-4">
+                <div id="section-family" className="space-y-4 scroll-mt-6">
                   <div className="border-b border-neutral-200 pb-2 flex items-center justify-between">
                     <div>
                       <h3 className="font-display text-base font-bold text-neutral-950">
@@ -1885,7 +2078,7 @@ export const ApplicantScreen: React.FC<ApplicantScreenProps> = ({
                 </div>
 
                 {/* SECTION 3: Educational Details */}
-                <div className="space-y-4">
+                <div id="section-educational" className="space-y-4 scroll-mt-6">
                   <div className="border-b border-neutral-200 pb-2 flex items-center justify-between">
                     <div>
                       <h3 className="font-display text-base font-bold text-neutral-950">
@@ -2006,7 +2199,7 @@ export const ApplicantScreen: React.FC<ApplicantScreenProps> = ({
                 </div>
 
                 {/* SECTION 4: Financial Details */}
-                <div className="space-y-4">
+                <div id="section-financial" className="space-y-4 scroll-mt-6">
                   <div className="border-b border-neutral-200 pb-2 flex items-center justify-between">
                     <div>
                       <h3 className="font-display text-base font-bold text-neutral-950">
@@ -2082,7 +2275,7 @@ export const ApplicantScreen: React.FC<ApplicantScreenProps> = ({
                 </div>
 
                 {/* SECTION 5: Document Uploads (Completed in the same process!) */}
-                <div className="space-y-4">
+                <div id="section-documents" className="space-y-4 scroll-mt-6">
                   <div className="border-b border-neutral-200 pb-2 flex items-center justify-between">
                     <div>
                       <h3 className="font-display text-base font-bold text-neutral-950">
@@ -2825,14 +3018,23 @@ export const ApplicantScreen: React.FC<ApplicantScreenProps> = ({
                           Your applicant details and documents are editable. Click below to save any changes to your application.
                         </p>
                       </div>
-                      <button
-                        type="button"
-                        onClick={handleSaveDraft}
-                        className="w-full sm:w-auto px-8 py-3 rounded-xl text-sm font-bold bg-[#FFC20E] text-neutral-950 hover:bg-[#e5ae0b] shadow-sm transition-all flex items-center justify-center gap-2 cursor-pointer"
-                      >
-                        <Save className="w-4 h-4 stroke-[2.5]" />
-                        <span>Save & Update Application</span>
-                      </button>
+                      <div className="flex items-center gap-3 w-full sm:w-auto">
+                        <button
+                          type="button"
+                          onClick={() => navigate('/applicant/application')}
+                          className="w-full sm:w-auto px-5 py-3 rounded-xl text-sm font-semibold border border-neutral-300 bg-white text-neutral-700 hover:bg-neutral-100 transition-colors cursor-pointer"
+                        >
+                          Cancel Editing
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleSaveDraft}
+                          className="w-full sm:w-auto px-8 py-3 rounded-xl text-sm font-bold bg-[#FFC20E] text-neutral-950 hover:bg-[#e5ae0b] shadow-sm transition-all flex items-center justify-center gap-2 cursor-pointer"
+                        >
+                          <Save className="w-4 h-4 stroke-[2.5]" />
+                          <span>Save & Update Application</span>
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>

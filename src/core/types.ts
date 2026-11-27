@@ -151,6 +151,20 @@ export interface ApplicationAnswers {
   stream?: string;
   incomeSource?: string;
   eligibilityProofType?: 'school_fee_receipt' | 'govt_school_attendance' | 'employment_proof';
+
+  // Additional optional details & legacy prototype fields
+  address?: string;
+  district?: string;
+  state?: string;
+  academicYear?: string;
+  previousMarks?: string;
+  totalMarks?: string;
+  percentage?: string;
+  monthlyRent?: string;
+  schoolFees?: string;
+  electricityBillAmount?: string;
+  otherExpenses?: string;
+  outstandingLoans?: string;
 }
 
 export interface StatusHistoryEntry {

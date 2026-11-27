@@ -17,11 +17,14 @@ import {
   Sparkles,
   User,
 } from 'lucide-react';
-import { DISTRICTS_8 } from '../core/types';
+import { DISTRICTS_8, type AuthSessionUser } from '../core/types';
 import { generateSampleRegistrationDetails } from '../core/demoGenerator';
+import { useMaatramStore } from '../core/store';
 import {
   accountExists,
   createApplicantAccount,
+  getApplicantApplication,
+  getApplicantByCodeOrEmail,
   validateRegistrationFields,
 } from '../core/applicantAuth';
 import {
@@ -33,6 +36,7 @@ import {
 
 export const RegisterScreen: React.FC = () => {
   const navigate = useNavigate();
+  const loginUser = useMaatramStore((s) => s.loginUser);
 
   // Form input states
   const [fullName, setFullName] = useState('');
@@ -255,8 +259,46 @@ export const RegisterScreen: React.FC = () => {
     }
   };
 
-  const handleProceedToLogin = () => {
-    // Navigate to Login screen with Application Code pre-filled
+  const handleViewStatus = async () => {
+    // 1. Log in the newly registered applicant
+    const account =
+      getApplicantByCodeOrEmail(generatedMaaCode) ||
+      (email ? getApplicantByCodeOrEmail(email) : null);
+
+    if (account) {
+      const authUser: AuthSessionUser = {
+        id: account.applicationCode,
+        personId: account.applicationCode,
+        role: 'applicant',
+        name: account.fullName,
+        email: account.email,
+        subtitle: 'Applicant',
+      };
+      loginUser(authUser);
+
+      // 2. Check the applicant's actual application record BEFORE navigating
+      const application = await getApplicantApplication(authUser.id, authUser.email);
+
+      if (!application) {
+        navigate('/apply-now');
+        return;
+      }
+
+      if (application.status === 'DRAFT') {
+        navigate('/application-form');
+        return;
+      }
+
+      if (application.status === 'SUBMITTED') {
+        navigate('/status-pipeline');
+        return;
+      }
+    } else {
+      navigate('/login/applicant');
+    }
+  };
+
+  const handleSignInAndApply = () => {
     try {
       localStorage.setItem('maatram_last_registered_code', generatedMaaCode);
       localStorage.setItem('maatram_last_registered_email', email.trim().toLowerCase());
@@ -718,7 +760,7 @@ export const RegisterScreen: React.FC = () => {
                 <div className="flex flex-col sm:flex-row items-center gap-3 pt-2">
                   <button
                     type="button"
-                    onClick={handleProceedToLogin}
+                    onClick={handleViewStatus}
                     className="w-full sm:w-1/2 flex items-center justify-center gap-2 px-5 py-3.5 rounded-xl font-bold text-sm bg-neutral-950 text-white hover:bg-neutral-800 transition-colors shadow-xs cursor-pointer"
                   >
                     <span>View Status</span>
@@ -727,7 +769,7 @@ export const RegisterScreen: React.FC = () => {
 
                   <button
                     type="button"
-                    onClick={handleProceedToLogin}
+                    onClick={handleSignInAndApply}
                     className="w-full sm:w-1/2 flex items-center justify-center gap-2 px-5 py-3.5 rounded-xl font-bold text-sm bg-[#FFC20E] text-neutral-950 hover:bg-[#e5ae0b] transition-colors shadow-xs cursor-pointer"
                   >
                     <span>Sign In & Apply</span>

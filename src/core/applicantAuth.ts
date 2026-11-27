@@ -46,7 +46,7 @@ export interface DraftApplicationRecord {
   personId: string;
   email: string;
   savedAt: string;
-  answers: ApplicationAnswers;
+  answers: Partial<ApplicationAnswers>;
   documents: UploadedDocument[];
 }
 
@@ -484,6 +484,101 @@ export async function authenticateApplicant(
   };
 }
 
+export interface ApplicantApplicationRecord {
+  status: 'DRAFT' | 'SUBMITTED';
+  applicationCode?: string;
+  submittedAt?: string;
+  stage?: LifecycleStage;
+  answers: ApplicationAnswers;
+  documents: UploadedDocument[];
+  lastSavedAt?: string;
+}
+
+/**
+ * Retrieves the applicant's scholarship application.
+ * Returns:
+ * - null: if the applicant has only registered an account (no application created yet).
+ * - { status: 'DRAFT', ... }: if the applicant has saved an in-progress draft.
+ * - { status: 'SUBMITTED', ... }: if the applicant has successfully submitted their application.
+ */
+export function getApplicantApplication(
+  identifier: string,
+  email?: string
+): ApplicantApplicationRecord | null {
+  const normEmail = (email || '').trim().toLowerCase();
+  const storage = getStorage();
+  if (!storage) return null;
+
+  // 1. Check submitted applications first
+  try {
+    const raw = storage.getItem(SUBMITTED_STORAGE_KEY);
+    if (raw) {
+      const list: SubmittedApplicationRecord[] = JSON.parse(raw);
+      if (Array.isArray(list)) {
+        const match = list.find(
+          (a) =>
+            a.personId === identifier ||
+            a.applicationCode === identifier ||
+            (normEmail && a.email && a.email.toLowerCase() === normEmail)
+        );
+        if (match && match.submittedAt) {
+          return {
+            status: 'SUBMITTED',
+            applicationCode: match.applicationCode,
+            submittedAt: match.submittedAt,
+            stage: match.stage || 'application',
+            answers: match.answers || { ...DEFAULT_APPLICATION_ANSWERS },
+            documents: match.documents || [],
+          };
+        }
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  // 2. Check draft applications
+  try {
+    const rawDraft = storage.getItem(DRAFT_STORAGE_KEY);
+    if (rawDraft) {
+      const drafts: Record<string, DraftApplicationRecord> = JSON.parse(rawDraft);
+      const draftList = Object.values(drafts);
+      const account =
+        getApplicantByCodeOrEmail(identifier) ||
+        (normEmail ? getApplicantByCodeOrEmail(normEmail) : null);
+      const targetPersonId = account?.personId || identifier;
+      const targetMaaCode = account?.applicationCode;
+
+      const draft =
+        drafts[identifier] ||
+        drafts[targetPersonId] ||
+        (targetMaaCode ? drafts[targetMaaCode] : null) ||
+        (normEmail ? drafts[normEmail] : null) ||
+        draftList.find(
+          (d) =>
+            d.personId === identifier ||
+            d.personId === targetPersonId ||
+            (targetMaaCode && d.personId === targetMaaCode) ||
+            (normEmail && d.email && d.email.toLowerCase() === normEmail)
+        );
+
+      if (draft && draft.answers && Object.keys(draft.answers).length > 0) {
+        return {
+          status: 'DRAFT',
+          answers: { ...DEFAULT_APPLICATION_ANSWERS, ...draft.answers },
+          documents: draft.documents || [],
+          lastSavedAt: draft.savedAt,
+        };
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  // No application record created yet (Account registered only)
+  return null;
+}
+
 /**
  * Checks whether an applicant has submitted a scholarship application.
  * Returns submitted details, stage, and draft details.
@@ -512,6 +607,7 @@ export function getApplicantApplicationState(
           const match = list.find(
             (a) =>
               a.personId === personId ||
+              a.applicationCode === personId ||
               (normEmail && a.email && a.email.toLowerCase() === normEmail)
           );
           if (match && match.submittedAt) {
@@ -542,7 +638,7 @@ export function getApplicantApplicationState(
         const drafts: Record<string, DraftApplicationRecord> = JSON.parse(rawDraft);
         const draft = drafts[personId] || (normEmail ? drafts[normEmail] : null);
         if (draft && draft.answers) {
-          draftAnswers = draft.answers;
+          draftAnswers = { ...DEFAULT_APPLICATION_ANSWERS, ...draft.answers };
           draftDocs = draft.documents || [];
         }
       }
@@ -569,7 +665,7 @@ export function getApplicantApplicationState(
 export function saveDraftApplication(
   personId: string,
   email: string,
-  answers: ApplicationAnswers,
+  answers: Partial<ApplicationAnswers>,
   documents: UploadedDocument[] = []
 ): void {
   const storage = getStorage();
@@ -579,13 +675,24 @@ export function saveDraftApplication(
     const raw = storage.getItem(DRAFT_STORAGE_KEY);
     const drafts: Record<string, DraftApplicationRecord> = raw ? JSON.parse(raw) : {};
 
-    drafts[personId] = {
+    const record: DraftApplicationRecord = {
       personId,
       email: email.trim().toLowerCase(),
       savedAt: new Date().toISOString(),
       answers,
       documents,
     };
+
+    drafts[personId] = record;
+    if (email) {
+      drafts[email.trim().toLowerCase()] = record;
+    }
+    const account =
+      getApplicantByCodeOrEmail(personId) ||
+      (email ? getApplicantByCodeOrEmail(email) : null);
+    if (account?.applicationCode) {
+      drafts[account.applicationCode] = record;
+    }
 
     storage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(drafts));
   } catch {
@@ -604,11 +711,17 @@ export function submitApplicantApplication(
   email: string,
   phone: string,
   fullName: string,
-  answers: ApplicationAnswers,
+  answers: ApplicationAnswers | Partial<ApplicationAnswers>,
   documents: UploadedDocument[]
 ): SubmittedApplicationRecord {
   const normEmail = email.trim().toLowerCase();
   const storage = getStorage();
+
+  const fullAnswers: ApplicationAnswers = {
+    ...DEFAULT_APPLICATION_ANSWERS,
+    ...answers,
+    fullName: fullName || answers.fullName || '',
+  };
 
   const record: SubmittedApplicationRecord = {
     personId,
@@ -619,7 +732,7 @@ export function submitApplicantApplication(
     fullName,
     stage: 'application',
     submittedAt: new Date().toISOString(),
-    answers,
+    answers: fullAnswers,
     documents,
   };
 
@@ -655,24 +768,85 @@ export function submitApplicantApplication(
  */
 export function updateApplicantApplication(
   personId: string,
-  answers: ApplicationAnswers,
-  documents: UploadedDocument[]
+  answers: ApplicationAnswers | Partial<ApplicationAnswers>,
+  documents: UploadedDocument[],
+  email?: string,
+  applicationCode?: string
 ): SubmittedApplicationRecord | null {
+  const cleanId = (personId || '').trim();
+  const cleanEmail = (email || '').trim().toLowerCase();
+  const cleanCode = (applicationCode || '').trim();
   const storage = getStorage();
   if (!storage) return null;
 
   try {
     const raw = storage.getItem(SUBMITTED_STORAGE_KEY);
-    if (!raw) return null;
-    const list: SubmittedApplicationRecord[] = JSON.parse(raw);
-    const existing = list.find((a) => a.personId === personId);
-    if (!existing) return null;
+    let list: SubmittedApplicationRecord[] = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(list)) list = [];
 
-    existing.answers = { ...existing.answers, ...answers };
-    existing.documents = documents;
-    existing.updatedAt = new Date().toISOString();
+    let existing = list.find(
+      (a) =>
+        (cleanId && (a.personId === cleanId || a.applicationCode === cleanId)) ||
+        (cleanCode && (a.applicationCode === cleanCode || a.personId === cleanCode)) ||
+        (cleanEmail && a.email && a.email.toLowerCase() === cleanEmail)
+    );
+
+    if (existing) {
+      existing.answers = { ...existing.answers, ...answers };
+      if (documents && documents.length > 0) {
+        existing.documents = documents;
+      }
+      if (answers.fullName) existing.fullName = answers.fullName;
+      if (answers.phone) existing.phone = answers.phone;
+      if (cleanEmail) existing.email = cleanEmail;
+      existing.updatedAt = new Date().toISOString();
+    } else {
+      const fullAnswers: ApplicationAnswers = {
+        ...DEFAULT_APPLICATION_ANSWERS,
+        ...answers,
+      };
+      existing = {
+        personId: cleanId || `P-${Date.now()}`,
+        applicationCode: cleanCode || `MAA-2026-${Math.floor(1000 + Math.random() * 9000)}`,
+        identityRef: answers.identityRef || `ID-${cleanId}`,
+        email: cleanEmail || '',
+        phone: answers.phone || '',
+        fullName: answers.fullName || '',
+        stage: 'application',
+        submittedAt: new Date().toISOString(),
+        answers: fullAnswers,
+        documents: documents || [],
+        updatedAt: new Date().toISOString(),
+      };
+      list.push(existing);
+    }
 
     storage.setItem(SUBMITTED_STORAGE_KEY, JSON.stringify(list));
+
+    // Also update accounts storage if user has an account
+    try {
+      const rawAccounts = storage.getItem(ACCOUNTS_STORAGE_KEY);
+      if (rawAccounts) {
+        const accounts: ApplicantAccount[] = JSON.parse(rawAccounts);
+        if (Array.isArray(accounts)) {
+          const acc = accounts.find(
+            (a) =>
+              (cleanId && (a.personId === cleanId || a.applicationCode === cleanId)) ||
+              (cleanCode && a.applicationCode === cleanCode) ||
+              (cleanEmail && a.email && a.email.toLowerCase() === cleanEmail)
+          );
+          if (acc) {
+            if (answers.fullName) acc.fullName = answers.fullName;
+            if (answers.phone) acc.phone = answers.phone;
+            if (answers.dob) acc.dob = answers.dob;
+            storage.setItem(ACCOUNTS_STORAGE_KEY, JSON.stringify(accounts));
+          }
+        }
+      }
+    } catch {
+      // ignore
+    }
+
     return existing;
   } catch {
     return null;

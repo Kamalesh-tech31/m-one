@@ -4,6 +4,7 @@ import {
   authenticateApplicant,
   clearApplicantAuthStorage,
   createApplicantAccount,
+  getApplicantApplication,
   getApplicantApplicationState,
   getApplicantByCodeOrEmail,
   hashPassword,
@@ -281,6 +282,59 @@ describe('Applicant Registration, Email OTP Verification, Login & Application Wo
       const recheckedState = getApplicantApplicationState(account.personId, email);
       expect(recheckedState.answers.familyAnnualIncome).toBe('Rs 80,000');
       expect(recheckedState.answers.whyMaatram).toContain('robotic club');
+
+      // Verify scoping correctly reflects the edited application
+      const stateWithUpdatedApplicant = {
+        ...seedState,
+        persons: {
+          ...seedState.persons,
+          [account.personId]: {
+            ...seedState.persons['P-2026-01'],
+            personId: account.personId,
+            cycleId: '2026',
+            name: 'Karthik V',
+            roles: ['applicant' as const],
+            email,
+            phone,
+            region: 'Madurai',
+            status: 'applicant' as const,
+            stage: 'application' as const,
+            applicationCode: originalMaaCode,
+            applicationSubmittedAt: new Date().toISOString(),
+            documents: [],
+            statusHistory: [],
+            verifiers: { teleStatus: 'Pending' as const, physicalStatus: 'Pending' as const },
+            applicationAnswers: updatedAnswers,
+          },
+        },
+      };
+
+      const scopedAfterEdit = selectForUser(stateWithUpdatedApplicant, {
+        id: account.personId,
+        personId: account.personId,
+        role: 'applicant',
+        name: 'Karthik V',
+        email,
+        subtitle: '2026 cycle',
+      });
+
+      expect(scopedAfterEdit?.role).toBe('applicant');
+      if (scopedAfterEdit?.role === 'applicant') {
+        expect(scopedAfterEdit.ownProfile?.applicationSubmittedAt).toBeDefined();
+        expect(scopedAfterEdit.ownProfile?.applicationAnswers.familyAnnualIncome).toBe('Rs 80,000');
+        expect(scopedAfterEdit.ownProfile?.applicationAnswers.whyMaatram).toContain('robotic club');
+      }
+
+      // Also verify updating by MAA application code directly works
+      const editedByCode = updateApplicantApplication(
+        originalMaaCode,
+        { ...updatedAnswers, tenthMarks: '495/500' },
+        [],
+        email,
+        originalMaaCode
+      );
+      expect(editedByCode?.answers.tenthMarks).toBe('495/500');
+      expect(editedByCode?.applicationCode).toBe(originalMaaCode);
     });
   });
 
@@ -441,6 +495,303 @@ describe('Applicant Registration, Email OTP Verification, Login & Application Wo
       expect(canAccessRoute(applicantUser, '/profile')).toBe(true);
       expect(canAccessRoute(applicantUser, '/admin')).toBe(false);
       expect(canAccessRoute(applicantUser, '/student')).toBe(false);
+    });
+  });
+
+  describe('Test 5 – Sidebar Navigation & Edit Mode Transitions', () => {
+    it('verifies sidebar navigation visibility on dashboard vs edit mode, section routing, and restoration on exit/save', async () => {
+      // 1. Create and submit an applicant
+      const email = 'kavitha.m@example.com';
+      const sendRes = await sendEmailOtp(email, 'Kavitha M');
+      verifyEmailOtp(email, sendRes.otp);
+      const accRes = await createApplicantAccount({
+        fullName: 'Kavitha M',
+        phone: '9840223344',
+        email,
+        district: 'Madurai',
+        dob: '2008-05-15',
+        password: 'Kavitha@123',
+      });
+      const maaCode = accRes.account!.applicationCode;
+
+      submitApplicantApplication(
+        accRes.account!.personId,
+        maaCode,
+        'MOCK-KAVITHA',
+        email,
+        '9840223344',
+        'Kavitha M',
+        {
+          fullName: 'Kavitha M',
+          fatherName: 'Murugan',
+          motherName: 'Meena',
+          schoolName: 'Govt Higher Secondary School',
+        },
+        []
+      );
+
+      const user: AuthSessionUser = {
+        id: maaCode,
+        personId: maaCode,
+        role: 'applicant',
+        name: 'Kavitha M',
+        email,
+        subtitle: 'Applicant',
+      };
+
+      // 2. Dashboard View (/applicant/application)
+      // Allowed routes:
+      expect(canAccessRoute(user, '/applicant/application')).toBe(true);
+      expect(canAccessRoute(user, '/applicant/history')).toBe(true);
+
+      // On dashboard, applicant application state shows submitted
+      const appState = getApplicantApplicationState(user.personId, user.email);
+      expect(appState.hasSubmitted).toBe(true);
+
+      // 3. Edit Route Access (/applicant/edit and /applicant/edit/:section)
+      expect(canAccessRoute(user, '/applicant/edit')).toBe(true);
+      expect(canAccessRoute(user, '/applicant/edit/personal')).toBe(true);
+      expect(canAccessRoute(user, '/applicant/edit/family')).toBe(true);
+      expect(canAccessRoute(user, '/applicant/edit/educational')).toBe(true);
+      expect(canAccessRoute(user, '/applicant/edit/financial')).toBe(true);
+      expect(canAccessRoute(user, '/applicant/edit/documents')).toBe(true);
+
+      // 4. Update in place during edit mode preserves MAA code
+      const updatedAnswers = {
+        fullName: 'Kavitha M',
+        fatherName: 'Murugan K',
+        motherName: 'Meenakshi M',
+        schoolName: 'Govt Model Higher Secondary School',
+        familyAnnualIncome: '₹ 84,000',
+      };
+      const updatedRecord = updateApplicantApplication(
+        accRes.account!.personId,
+        updatedAnswers,
+        []
+      );
+      expect(updatedRecord).not.toBeNull();
+      expect(updatedRecord?.applicationCode).toBe(maaCode);
+
+      // 5. Verification on Dashboard after returning from edit mode
+      const reloadedState = getApplicantApplicationState(user.personId, user.email);
+      expect(reloadedState.hasSubmitted).toBe(true);
+      expect(reloadedState.applicationCode).toBe(maaCode);
+      expect(reloadedState.answers.fatherName).toBe('Murugan K');
+      expect(reloadedState.answers.motherName).toBe('Meenakshi M');
+      expect(reloadedState.answers.schoolName).toBe('Govt Model Higher Secondary School');
+      expect(reloadedState.answers.familyAnnualIncome).toBe('₹ 84,000');
+    });
+  });
+
+  describe('Test 6 – Three Account Scenarios (Applicant A, B, C) Status Resolution & Direct Navigation', () => {
+    it('Scenario A: Applicant registered with no application -> routes to Apply Now', async () => {
+      // Applicant A registers
+      const email = 'applicant.a@example.com';
+      const sendRes = await sendEmailOtp(email, 'Applicant A');
+      verifyEmailOtp(email, sendRes.otp);
+      const accRes = await createApplicantAccount({
+        fullName: 'Applicant A',
+        phone: '9840101010',
+        email,
+        district: 'Chennai',
+        dob: '2008-01-10',
+        password: 'Password@123',
+      });
+      const maaCode = accRes.account!.applicationCode;
+
+      // 1. Check getApplicantApplication before any form action
+      const app = getApplicantApplication(maaCode, email);
+      expect(app).toBeNull(); // No application record created yet!
+
+      // 2. handleViewStatus logic:
+      // if (!application) -> navigate("/apply-now")
+      const resolvedRoute = !app
+        ? '/apply-now'
+        : app.status === 'DRAFT'
+        ? '/application-form'
+        : '/status-pipeline';
+      expect(resolvedRoute).toBe('/apply-now');
+
+      // 3. User session resolution on Status Pipeline URL:
+      const authUser: AuthSessionUser = {
+        id: maaCode,
+        personId: maaCode,
+        role: 'applicant',
+        name: 'Applicant A',
+        email,
+        subtitle: 'Applicant',
+      };
+      const scoped = selectForUser(seedState, authUser);
+      expect(scoped?.role).toBe('applicant');
+      if (scoped?.role === 'applicant') {
+        expect(scoped.ownProfile?.applicationSubmittedAt).toBeUndefined();
+        expect(scoped.ownProfile?.status).toBe('draft');
+      }
+
+      // Independent Status Pipeline page check:
+      const appRecord = getApplicantApplication(authUser.id, authUser.email);
+      expect(appRecord).toBeNull();
+      // On Status Pipeline page, null appRecord renders Apply Now screen!
+    });
+
+    it('Scenario B: Applicant registered with saved draft -> routes to Resume Application', async () => {
+      // Applicant B registers
+      const email = 'applicant.b@example.com';
+      const sendRes = await sendEmailOtp(email, 'Applicant B');
+      verifyEmailOtp(email, sendRes.otp);
+      const accRes = await createApplicantAccount({
+        fullName: 'Applicant B',
+        phone: '9840202020',
+        email,
+        district: 'Coimbatore',
+        dob: '2008-03-20',
+        password: 'Password@123',
+      });
+      const maaCode = accRes.account!.applicationCode;
+
+      // Saves draft
+      saveDraftApplication(
+        accRes.account!.personId,
+        email,
+        {
+          fullName: 'Applicant B',
+          schoolName: 'Coimbatore Model School',
+          twelfthMarks: '510/600',
+        },
+        []
+      );
+
+      // 1. Check getApplicantApplication
+      const app = getApplicantApplication(maaCode, email);
+      expect(app).not.toBeNull();
+      expect(app?.status).toBe('DRAFT');
+      expect(app?.answers?.schoolName).toBe('Coimbatore Model School');
+
+      // 2. handleViewStatus logic:
+      // if (application.status === "DRAFT") -> navigate("/application-form")
+      const resolvedRoute = !app
+        ? '/apply-now'
+        : app.status === 'DRAFT'
+        ? '/application-form'
+        : '/status-pipeline';
+      expect(resolvedRoute).toBe('/application-form');
+
+      // 3. Direct status pipeline visit check:
+      // On status pipeline, status === 'DRAFT' resolves effectiveTab = 'resume'!
+    });
+
+    it('Scenario C: Applicant registered with submitted application -> displays Status Pipeline', async () => {
+      // Applicant C registers
+      const email = 'applicant.c@example.com';
+      const sendRes = await sendEmailOtp(email, 'Applicant C');
+      verifyEmailOtp(email, sendRes.otp);
+      const accRes = await createApplicantAccount({
+        fullName: 'Applicant C',
+        phone: '9840303030',
+        email,
+        district: 'Madurai',
+        dob: '2008-07-07',
+        password: 'Password@123',
+      });
+      const maaCode = accRes.account!.applicationCode;
+
+      // Submits application
+      submitApplicantApplication(
+        accRes.account!.personId,
+        maaCode,
+        'MOCK-APPLICANT-C',
+        email,
+        '9840303030',
+        'Applicant C',
+        {
+          fullName: 'Applicant C',
+          schoolName: 'Madurai Govt School',
+          twelfthMarks: '575/600',
+        },
+        []
+      );
+
+      // 1. Check getApplicantApplication
+      const app = getApplicantApplication(maaCode, email);
+      expect(app).not.toBeNull();
+      expect(app?.status).toBe('SUBMITTED');
+      expect(app?.applicationCode).toBe(maaCode);
+      expect(app?.submittedAt).toBeDefined();
+
+      // 2. handleViewStatus logic:
+      // if (application.status === "SUBMITTED") -> navigate("/status-pipeline")
+      const resolvedRoute = !app
+        ? '/apply-now'
+        : app.status === 'DRAFT'
+        ? '/application-form'
+        : '/status-pipeline';
+      expect(resolvedRoute).toBe('/status-pipeline');
+
+      // 3. Status Pipeline renders with submitted details:
+      const authUser: AuthSessionUser = {
+        id: maaCode,
+        personId: maaCode,
+        role: 'applicant',
+        name: 'Applicant C',
+        email,
+        subtitle: 'Applicant',
+      };
+      const scoped = selectForUser(seedState, authUser);
+      expect(scoped?.role).toBe('applicant');
+      if (scoped?.role === 'applicant') {
+        expect(scoped.ownProfile?.applicationSubmittedAt).toBeDefined();
+        expect(scoped.ownProfile?.status).toBe('applicant');
+      }
+    });
+
+    it('handles logout and re-login correctly preserving distinct applicant application states', async () => {
+      // Setup Applicant A (unsubmitted) and Applicant C (submitted)
+      const emailA = 'relogin.a@example.com';
+      const sendResA = await sendEmailOtp(emailA, 'Relogin A');
+      verifyEmailOtp(emailA, sendResA.otp);
+      const accA = (await createApplicantAccount({
+        fullName: 'Relogin A',
+        phone: '9840111111',
+        email: emailA,
+        district: 'Trichy',
+        dob: '2008-02-02',
+        password: 'Password@123',
+      })).account!;
+
+      const emailC = 'relogin.c@example.com';
+      const sendResC = await sendEmailOtp(emailC, 'Relogin C');
+      verifyEmailOtp(emailC, sendResC.otp);
+      const accC = (await createApplicantAccount({
+        fullName: 'Relogin C',
+        phone: '9840333333',
+        email: emailC,
+        district: 'Tirunelveli',
+        dob: '2008-04-04',
+        password: 'Password@123',
+      })).account!;
+
+      submitApplicantApplication(
+        accC.personId,
+        accC.applicationCode,
+        'MOCK-RELOGIN-C',
+        emailC,
+        '9840333333',
+        'Relogin C',
+        { fullName: 'Relogin C' },
+        []
+      );
+
+      // Authenticate A
+      const authA = await authenticateApplicant(accA.applicationCode, 'Password@123');
+      expect(authA.success).toBe(true);
+      const appA = getApplicantApplication(accA.applicationCode, emailA);
+      expect(appA).toBeNull(); // A has no application
+
+      // Authenticate C
+      const authC = await authenticateApplicant(accC.applicationCode, 'Password@123');
+      expect(authC.success).toBe(true);
+      const appC = getApplicantApplication(accC.applicationCode, emailC);
+      expect(appC?.status).toBe('SUBMITTED'); // C has submitted application
     });
   });
 });

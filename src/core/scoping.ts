@@ -82,8 +82,6 @@ export function getSidebarItemsForRole(role: UserRole): SidebarNavItem[] {
     case 'applicant':
       return [
         { id: 'application', path: '/applicant/application', label: 'Application', group: 'Application' },
-        { id: 'form', path: '/applicant/form', label: 'Form', group: 'Application' },
-        { id: 'history', path: '/applicant/history', label: 'Status history', group: 'Application' },
       ];
     case 'student':
       return [
@@ -147,7 +145,13 @@ export function canAccessRoute(
 
   switch (user.role) {
     case 'applicant':
-      return clean === '/applicant' || clean.startsWith('/applicant/');
+      return (
+        clean === '/applicant' ||
+        clean.startsWith('/applicant/') ||
+        clean === '/apply-now' ||
+        clean === '/application-form' ||
+        clean === '/status-pipeline'
+      );
     case 'student':
       return clean === '/student' || clean.startsWith('/student/');
     case 'anchor':
@@ -384,6 +388,12 @@ export function selectForUser(
           region: account?.district || 'Chennai',
           stage: appState.stage || 'application',
           status: appState.hasSubmitted ? 'applicant' : 'draft',
+          shortlisted: false,
+          cgpaHistory: [],
+          achievements: [],
+          volunteeringCounts: { teleVerifications: 0, physicalVerifications: 0, schoolVisits: 0 },
+          placementRecord: { companiesAttended: [], offerStatus: 'Preparing' },
+          careerHistory: [],
           documents: appState.documents || [],
           statusHistory: [],
           verifiers: {
@@ -392,10 +402,10 @@ export function selectForUser(
           },
           applicationAnswers: {
             ...DEFAULT_APPLICATION_ANSWERS,
-            fullName: account?.fullName || user.name || '',
             phone: account?.phone || '',
             dob: account?.dob || '',
             ...appState.answers,
+            fullName: account?.fullName || user.name || appState.answers?.fullName || '',
           },
         };
       }
@@ -414,8 +424,11 @@ export function selectForUser(
       ownProfile.region = account.district || ownProfile.region;
     }
 
-    if (appState.hasSubmitted) {
-      ownProfile.applicationSubmittedAt = appState.submittedAt;
+    const isSubmitted = appState.hasSubmitted || Boolean(ownProfile.applicationSubmittedAt);
+
+    if (isSubmitted) {
+      ownProfile.applicationSubmittedAt =
+        appState.submittedAt || ownProfile.applicationSubmittedAt || new Date().toISOString();
       ownProfile.status = 'applicant';
       ownProfile.stage = appState.stage || ownProfile.stage || 'application';
       if (appState.applicationCode) {

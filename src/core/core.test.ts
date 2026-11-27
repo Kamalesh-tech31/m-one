@@ -473,13 +473,9 @@ describe('Maatram One Role Auth, Route Guard & Scoping', () => {
     const applicantItems = getSidebarItemsForRole('applicant');
     expect(applicantItems.map((i) => i.label)).toEqual([
       'Application',
-      'Form',
-      'Status history',
     ]);
     expect(applicantItems.map((i) => i.path)).toEqual([
       '/applicant/application',
-      '/applicant/form',
-      '/applicant/history',
     ]);
 
     const studentItems = getSidebarItemsForRole('student');

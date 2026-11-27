@@ -29,6 +29,7 @@ import {
   X,
 } from 'lucide-react';
 import { getSidebarItemsForRole, type SidebarNavItem } from '../core/scoping';
+import { getApplicantApplicationState } from '../core/applicantAuth';
 import type { AuthSessionUser } from '../core/types';
 
 interface AppShellProps {
@@ -96,13 +97,24 @@ export const AppShell: React.FC<AppShellProps> = ({
     });
   };
 
-  const navItems = useMemo(() => {
-    const items = getSidebarItemsForRole(user.role);
-    if (user.role === 'applicant') {
+  const isApplicantEditing = useMemo(() => {
+    if (user.role !== 'applicant') return false;
+    if (location.pathname.startsWith('/applicant/edit')) return true;
+
+    let isSubmitted = false;
+    try {
+      const appState = getApplicantApplicationState(user.personId, user.email);
+      if (appState.hasSubmitted) {
+        isSubmitted = true;
+      }
+    } catch {
+      // ignore
+    }
+    if (!isSubmitted) {
       try {
         const raw = localStorage.getItem('maatram_submitted_applicants');
         const list = raw ? JSON.parse(raw) : [];
-        const isSubmitted =
+        if (
           Array.isArray(list) &&
           list.some(
             (item: any) =>
@@ -110,16 +122,28 @@ export const AppShell: React.FC<AppShellProps> = ({
               (user.email &&
                 item.email &&
                 item.email.toLowerCase() === user.email.toLowerCase())
-          );
-        if (!isSubmitted) {
-          return items.filter((i) => i.id === 'form');
+          )
+        ) {
+          isSubmitted = true;
         }
       } catch {
         // ignore
       }
     }
-    return items;
-  }, [user.role, user.personId, user.email]);
+
+    if (
+      isSubmitted &&
+      (location.pathname === '/applicant/form' ||
+        location.pathname.startsWith('/applicant/form/'))
+    ) {
+      return true;
+    }
+    return false;
+  }, [user.role, user.personId, user.email, location.pathname]);
+
+  const navItems = useMemo(() => {
+    return getSidebarItemsForRole(user.role);
+  }, [user.role]);
 
   // Group items by group label
   const groupedItems = useMemo(() => {
@@ -148,44 +172,89 @@ export const AppShell: React.FC<AppShellProps> = ({
     setMobileDrawerOpen(false);
   }, [location.pathname]);
 
-  const renderNavList = () => (
-    <div className="flex-1 overflow-y-auto px-3 py-4 space-y-6">
-      {groupedItems.map((grp) => (
-        <div key={grp.group} className="space-y-1">
-          {!isCollapsed && (
-            <p className="px-3 text-[11px] font-bold uppercase tracking-wider text-neutral-400 select-none">
-              {grp.group}
-            </p>
-          )}
-          <nav className="space-y-0.5">
-            {grp.items.map((item) => {
-              const Icon = ICON_MAP[item.id] || FileText;
-              const isActive =
-                location.pathname === item.path ||
-                (item.id === navItems[0].id &&
-                  location.pathname === `/${user.role}`);
+  const renderNavList = () => {
+    if (isApplicantEditing) {
+      return (
+        <div className="flex-1 overflow-y-auto px-3 py-4 space-y-4">
+          {!isCollapsed ? (
+            <>
+              <div className="px-3.5 py-3 rounded-xl bg-neutral-50 border border-neutral-200 space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-[#FFC20E] shrink-0" />
+                  <p className="text-xs font-bold text-neutral-950">Editing Application</p>
+                </div>
+                <p className="text-[11px] text-neutral-500 leading-relaxed">
+                  Modifying submitted application details and documents.
+                </p>
+              </div>
 
-              return (
-                <NavLink
-                  key={item.id}
-                  to={item.path}
-                  title={isCollapsed ? item.label : undefined}
-                  className={`flex items-center gap-3 px-3 py-2 rounded-xl text-xs sm:text-sm font-medium transition-all ${
-                    isActive
-                      ? 'bg-neutral-100 text-neutral-950 font-semibold border-l-[3px] border-[#FFC20E]'
-                      : 'text-neutral-600 hover:text-neutral-950 hover:bg-neutral-50'
-                  }`}
-                >
-                  <Icon className="w-4 h-4 shrink-0" />
-                  {!isCollapsed && <span className="truncate">{item.label}</span>}
-                </NavLink>
-              );
-            })}
-          </nav>
+              <button
+                type="button"
+                onClick={() => {
+                  setMobileDrawerOpen(false);
+                  navigate('/applicant/application');
+                }}
+                className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs sm:text-sm font-semibold text-neutral-700 hover:text-neutral-950 hover:bg-neutral-100 transition-colors cursor-pointer border border-neutral-200 bg-white shadow-xs"
+              >
+                <ChevronLeft className="w-4 h-4 shrink-0 text-neutral-600" />
+                <span>Back to Application</span>
+              </button>
+            </>
+          ) : (
+            <div className="flex flex-col items-center py-2">
+              <button
+                type="button"
+                onClick={() => navigate('/applicant/application')}
+                title="Back to Application"
+                className="p-2.5 rounded-xl text-neutral-700 hover:text-neutral-950 hover:bg-neutral-100 transition-colors cursor-pointer"
+              >
+                <ChevronLeft className="w-5 h-5" />
+              </button>
+            </div>
+          )}
         </div>
-      ))}
-    </div>
-  );
+      );
+    }
+
+    return (
+      <div className="flex-1 overflow-y-auto px-3 py-4 space-y-6">
+        {groupedItems.map((grp) => (
+          <div key={grp.group} className="space-y-1">
+            {!isCollapsed && (
+              <p className="px-3 text-[11px] font-bold uppercase tracking-wider text-neutral-400 select-none">
+                {grp.group}
+              </p>
+            )}
+            <nav className="space-y-0.5">
+              {grp.items.map((item) => {
+                const Icon = ICON_MAP[item.id] || FileText;
+                const isActive =
+                  location.pathname === item.path ||
+                  (item.id === navItems[0].id &&
+                    location.pathname === `/${user.role}`);
+
+                return (
+                  <NavLink
+                    key={item.id}
+                    to={item.path}
+                    title={isCollapsed ? item.label : undefined}
+                    className={`flex items-center gap-3 px-3 py-2 rounded-xl text-xs sm:text-sm font-medium transition-all ${
+                      isActive
+                        ? 'bg-neutral-100 text-neutral-950 font-semibold border-l-[3px] border-[#FFC20E]'
+                        : 'text-neutral-600 hover:text-neutral-950 hover:bg-neutral-50'
+                    }`}
+                  >
+                    <Icon className="w-4 h-4 shrink-0" />
+                    {!isCollapsed && <span className="truncate">{item.label}</span>}
+                  </NavLink>
+                );
+              })}
+            </nav>
+          </div>
+        ))}
+      </div>
+    );
+  };
 
   return (
     <div className="min-h-screen bg-white text-neutral-950 flex flex-col md:flex-row">

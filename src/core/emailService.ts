@@ -35,6 +35,7 @@ class MemoryStorage {
   removeItem(key: string) { this.map.delete(key); }
   clear() { this.map.clear(); }
 }
+
 const memoryFallback = new MemoryStorage();
 
 export function getStorage(): { getItem(k: string): string | null; setItem(k: string, v: string): void; removeItem(k: string): void } {

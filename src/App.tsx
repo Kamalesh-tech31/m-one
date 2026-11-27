@@ -27,7 +27,10 @@ import {
   type ApplicantScopedView,
   type StudentScopedView,
 } from './core/scoping';
-import { getApplicantApplicationState } from './core/applicantAuth';
+import {
+  getApplicantApplication,
+  getApplicantApplicationState,
+} from './core/applicantAuth';
 import { useMaatramStore } from './core/store';
 import type { AppState, AuthSessionUser, PersonProfile } from './core/types';
 
@@ -67,23 +70,46 @@ function ApplicantViewWrapper({
   updateCurrentUserName,
   append,
   showToast,
+  overrideTab,
 }: {
   scopedData: ApplicantScopedView | null;
   currentActor: string;
   updateCurrentUserName: (name: string) => void;
   append: (input: any) => void;
   showToast: (msg: string) => void;
+  overrideTab?: ApplicantTab;
 }) {
-  const { tab } = useParams<{ tab?: string }>();
+  const location = useLocation();
+  const { tab, section } = useParams<{ tab?: string; section?: string }>();
   if (!scopedData) return null;
 
-  // In the applicant track, after entry the system checks whether the applicant is new.
-  // If so, it displays the application form and its details for completion.
-  // Once logged in with the generated code, it grants access to view the application status.
-  const isNewApplicant = !scopedData.ownProfile?.applicationSubmittedAt;
-  const effectiveTab: ApplicantTab = isNewApplicant
-    ? 'form'
-    : ((tab as ApplicantTab) || 'application');
+  const app = getApplicantApplication(
+    scopedData.ownProfile?.applicationCode || scopedData.ownProfile?.personId || '',
+    scopedData.ownProfile?.email
+  );
+
+  let rawTab = overrideTab || (tab as ApplicantTab);
+  if (!rawTab && (section || location.pathname.startsWith('/applicant/edit'))) {
+    rawTab = 'edit';
+  }
+  if (tab === 'edit') {
+    rawTab = 'edit';
+  }
+  let effectiveTab: ApplicantTab = rawTab || 'application';
+
+  // Independent verification of the applicant's application status on Status Pipeline page
+  if (!rawTab || rawTab === 'application') {
+    if (!app) {
+      // No application record -> Apply Now
+      effectiveTab = 'apply-now';
+    } else if (app.status === 'DRAFT') {
+      // Draft application -> Resume Application
+      effectiveTab = 'resume';
+    } else {
+      // Submitted application -> Display Status Pipeline
+      effectiveTab = 'application';
+    }
+  }
 
   return (
     <ApplicantScreen
@@ -92,6 +118,7 @@ function ApplicantViewWrapper({
       onUpdateSessionName={updateCurrentUserName}
       onAppend={append}
       activeTab={effectiveTab}
+      targetSection={section}
       showToast={showToast}
     />
   );
@@ -258,15 +285,26 @@ export default function App() {
     setToastMessage('');
     loginUser(user);
 
-    // Conditional routing based on actual scholarship application submission status
+    // Conditional routing based on actual scholarship application status
     if (user.role === 'applicant') {
-      const appState = getApplicantApplicationState(user.personId, user.email);
-      if (appState.hasSubmitted) {
-        // Case B: Applicant has already submitted application -> Route directly to Status Pipeline
-        navigate('/applicant/application');
-      } else {
-        // Case A: Applicant has NOT submitted application -> Route directly to Application Form
-        navigate('/applicant/form');
+      const application = getApplicantApplication(
+        user.personId || user.id,
+        user.email
+      );
+
+      if (!application) {
+        navigate('/apply-now');
+        return;
+      }
+
+      if (application.status === 'DRAFT') {
+        navigate('/application-form');
+        return;
+      }
+
+      if (application.status === 'SUBMITTED') {
+        navigate('/status-pipeline');
+        return;
       }
     } else {
       navigate(getHomeRouteForRole(user.role));
@@ -408,6 +446,103 @@ export default function App() {
                     updateCurrentUserName={updateCurrentUserName}
                     append={append}
                     showToast={showToast}
+                  />
+                </AppShell>
+              )}
+            </ProtectedRoleRoute>
+          }
+        />
+        <Route
+          path="/applicant/edit"
+          element={
+            <ProtectedRoleRoute user={currentUser} onUnauthorizedToast={showToast}>
+              {currentUser && (
+                <AppShell user={currentUser} onLogout={handleLogoutOrSwitch}>
+                  <ApplicantViewWrapper
+                    scopedData={scopedData as ApplicantScopedView}
+                    currentActor={currentActor}
+                    updateCurrentUserName={updateCurrentUserName}
+                    append={append}
+                    showToast={showToast}
+                    overrideTab="edit"
+                  />
+                </AppShell>
+              )}
+            </ProtectedRoleRoute>
+          }
+        />
+        <Route
+          path="/applicant/edit/:section"
+          element={
+            <ProtectedRoleRoute user={currentUser} onUnauthorizedToast={showToast}>
+              {currentUser && (
+                <AppShell user={currentUser} onLogout={handleLogoutOrSwitch}>
+                  <ApplicantViewWrapper
+                    scopedData={scopedData as ApplicantScopedView}
+                    currentActor={currentActor}
+                    updateCurrentUserName={updateCurrentUserName}
+                    append={append}
+                    showToast={showToast}
+                    overrideTab="edit"
+                  />
+                </AppShell>
+              )}
+            </ProtectedRoleRoute>
+          }
+        />
+
+        {/* Status Pipeline & Application Navigation Direct Aliases */}
+        <Route
+          path="/apply-now"
+          element={
+            <ProtectedRoleRoute user={currentUser} onUnauthorizedToast={showToast}>
+              {currentUser && (
+                <AppShell user={currentUser} onLogout={handleLogoutOrSwitch}>
+                  <ApplicantViewWrapper
+                    scopedData={scopedData as ApplicantScopedView}
+                    currentActor={currentActor}
+                    updateCurrentUserName={updateCurrentUserName}
+                    append={append}
+                    showToast={showToast}
+                    overrideTab="apply-now"
+                  />
+                </AppShell>
+              )}
+            </ProtectedRoleRoute>
+          }
+        />
+        <Route
+          path="/application-form"
+          element={
+            <ProtectedRoleRoute user={currentUser} onUnauthorizedToast={showToast}>
+              {currentUser && (
+                <AppShell user={currentUser} onLogout={handleLogoutOrSwitch}>
+                  <ApplicantViewWrapper
+                    scopedData={scopedData as ApplicantScopedView}
+                    currentActor={currentActor}
+                    updateCurrentUserName={updateCurrentUserName}
+                    append={append}
+                    showToast={showToast}
+                    overrideTab="form"
+                  />
+                </AppShell>
+              )}
+            </ProtectedRoleRoute>
+          }
+        />
+        <Route
+          path="/status-pipeline"
+          element={
+            <ProtectedRoleRoute user={currentUser} onUnauthorizedToast={showToast}>
+              {currentUser && (
+                <AppShell user={currentUser} onLogout={handleLogoutOrSwitch}>
+                  <ApplicantViewWrapper
+                    scopedData={scopedData as ApplicantScopedView}
+                    currentActor={currentActor}
+                    updateCurrentUserName={updateCurrentUserName}
+                    append={append}
+                    showToast={showToast}
+                    overrideTab="application"
                   />
                 </AppShell>
               )}

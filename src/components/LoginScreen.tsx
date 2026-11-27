@@ -141,37 +141,6 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
     onLogin(result.user);
   };
 
-  const handleVerifyApplicantCode = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!pendingApplicantUser) return;
-    const inputCode = applicantCodeInput.trim().toUpperCase();
-    const expected = expectedApplicantCode.trim().toUpperCase();
-
-    if (!inputCode) {
-      setApplicantCodeError('Please enter your generated code.');
-      return;
-    }
-
-    const isValid =
-      inputCode === expected ||
-      inputCode === 'APP-2026-07' ||
-      inputCode === 'P-2026-07' ||
-      inputCode.startsWith('MAA-2026-') ||
-      (expected && inputCode === expected.replace('APP-', 'P-')) ||
-      (expected && inputCode === expected.replace('P-', 'APP-')) ||
-      (expected && inputCode === expected.replace('MAA-', 'APP-'));
-
-    if (!isValid) {
-      setApplicantCodeError(
-        `Invalid code. Please enter the generated code for your application (e.g. ${expectedApplicantCode}).`
-      );
-      return;
-    }
-
-    // Only then can they view the status
-    onLogin(pendingApplicantUser);
-  };
-
   const handleVerifyOtp = (e: React.FormEvent) => {
     e.preventDefault();
     if (!pendingAdminUser) return;
@@ -192,10 +161,6 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
     setErrorMsg('');
     setAdminAwaitingOtp(false);
     setPendingAdminUser(null);
-    setApplicantAwaitingCode(false);
-    setPendingApplicantUser(null);
-    setApplicantCodeInput('');
-    setApplicantCodeError('');
     navigate('/login');
   };
 
