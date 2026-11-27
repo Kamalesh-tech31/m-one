@@ -1,12 +1,15 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
 import {
   AlertTriangle,
+  ArrowRight,
   Award,
   Briefcase,
   Building2,
   CalendarCheck,
   CheckCircle2,
+  ChevronRight,
   Clock,
   FileText,
   Flag,
@@ -14,9 +17,13 @@ import {
   Inbox,
   MapPin,
   Megaphone,
+  PhoneCall,
   Plus,
+  Sparkles,
+  TrendingUp,
   Upload,
   UserCheck,
+  Users,
 } from 'lucide-react';
 import { normalizeCompanyName } from '../core/normalization';
 import type { StudentScopedView } from '../core/scoping';
@@ -78,6 +85,7 @@ export const StudentScreen: React.FC<StudentScreenProps> = ({
   showToast,
 }) => {
   const activeStudent = scoped.ownProfile;
+  const navigate = useNavigate();
 
   // CGPA form
   const [semesterLabel, setSemesterLabel] = useState('Sem 5');
@@ -151,6 +159,11 @@ export const StudentScreen: React.FC<StudentScreenProps> = ({
     activeStudent.cgpaHistory.length > 0
       ? activeStudent.cgpaHistory[activeStudent.cgpaHistory.length - 1].gpa
       : null;
+
+  const totalVolunteering =
+    (activeStudent.volunteeringCounts?.teleVerifications || 0) +
+    (activeStudent.volunteeringCounts?.physicalVerifications || 0) +
+    (activeStudent.volunteeringCounts?.schoolVisits || 0);
 
   const anchorAnnouncements = scoped.groupAnnouncements;
   const anchorMeetings = scoped.groupMeetings;
@@ -440,63 +453,452 @@ export const StudentScreen: React.FC<StudentScreenProps> = ({
         </div>
       </div>
 
-      {/* 1. OVERVIEW: Profile Card & Verified Volunteering Impact Strip */}
+      {/* 1. OVERVIEW: Profile Card, Key Metrics Bento, Volunteering Breakdown & Cohort Feed */}
       {activeTab === 'overview' && (
         <div className="space-y-6">
-          <section className="bg-white border border-neutral-200 rounded-2xl p-6 sm:p-8 space-y-6 shadow-xs">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-neutral-100 pb-4">
-              <div>
-                <h2 className="font-display text-xl font-bold text-neutral-950">
-                  {activeStudent.name}
-                </h2>
-                <p className="text-xs text-neutral-600 mt-0.5">
-                  {activeStudent.degree} · {activeStudent.semesterLabel || 'Current Semester'} · {activeStudent.college}
-                </p>
-                <p className="text-xs text-neutral-500 mt-1">
-                  Anchor Mentor: <span className="font-semibold text-neutral-900">{scoped.anchorName || 'Assigned'}</span>
-                </p>
+          {/* Top Scholar Hero Banner */}
+          <section className="bg-white border border-neutral-200 rounded-3xl p-6 sm:p-8 shadow-xs relative overflow-hidden">
+            <div className="absolute top-0 right-0 w-80 h-80 bg-[#FFC20E]/10 rounded-full blur-3xl pointer-events-none" />
+
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 relative z-10">
+              <div className="flex items-start sm:items-center gap-4 sm:gap-5">
+                <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl bg-neutral-950 text-[#FFC20E] flex items-center justify-center font-display font-black text-2xl sm:text-3xl shrink-0 shadow-sm border border-neutral-800">
+                  {activeStudent.name
+                    .split(' ')
+                    .map((n) => n[0])
+                    .slice(0, 2)
+                    .join('')
+                    .toUpperCase() || 'ST'}
+                </div>
+                <div className="space-y-1.5">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h2 className="font-display text-xl sm:text-2xl font-black text-neutral-950 tracking-tight">
+                      {activeStudent.name}
+                    </h2>
+                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                      Verified Scholar
+                    </span>
+                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-[#FFC20E]/20 text-neutral-950 border border-[#FFC20E]/40">
+                      {activeStudent.semesterLabel || 'Current Semester'}
+                    </span>
+                  </div>
+
+                  <p className="text-xs sm:text-sm text-neutral-600 flex flex-wrap items-center gap-x-2.5 gap-y-1">
+                    <span className="flex items-center gap-1 font-semibold text-neutral-800">
+                      <GraduationCap className="w-4 h-4 text-neutral-500" />
+                      {activeStudent.degree || 'Undergraduate'}
+                    </span>
+                    <span className="text-neutral-300">·</span>
+                    <span className="flex items-center gap-1 font-medium text-neutral-700">
+                      <Building2 className="w-4 h-4 text-neutral-500" />
+                      {activeStudent.college || 'College of Study'}
+                    </span>
+                    {activeStudent.region && (
+                      <>
+                        <span className="text-neutral-300">·</span>
+                        <span className="flex items-center gap-1 text-neutral-600">
+                          <MapPin className="w-3.5 h-3.5 text-neutral-500" />
+                          {activeStudent.region}
+                        </span>
+                      </>
+                    )}
+                  </p>
+
+                  <div className="flex flex-wrap items-center gap-2.5 pt-1 text-xs">
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-neutral-50 border border-neutral-200 text-neutral-800 font-medium">
+                      <UserCheck className="w-3.5 h-3.5 text-amber-600 stroke-[2.5]" />
+                      Anchor Mentor: <strong className="font-semibold text-neutral-950">{scoped.anchorName || 'Assigned Anchor'}</strong>
+                    </span>
+                    {scoped.groupRosterCount > 0 && (
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-neutral-50 border border-neutral-200 text-neutral-700">
+                        <Users className="w-3.5 h-3.5 text-neutral-500" />
+                        Cohort: <strong className="font-semibold text-neutral-900">{scoped.groupRosterCount} Scholars</strong>
+                      </span>
+                    )}
+                  </div>
+                </div>
               </div>
 
-              <div className="p-3 bg-neutral-50 border border-neutral-200 rounded-xl text-right">
-                <p className="text-[11px] font-bold uppercase tracking-wider text-neutral-400">
-                  Latest CGPA
-                </p>
-                <p className="text-2xl font-mono font-bold text-neutral-950">
+              {/* Right Side Overview Stats Widget */}
+              <div className="flex items-center sm:self-end lg:self-center gap-3 shrink-0 pt-4 lg:pt-0 border-t lg:border-t-0 border-neutral-100">
+                <div className="p-4 bg-neutral-50 border border-neutral-200 rounded-2xl text-right min-w-[140px]">
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-neutral-400">
+                    Cumulative CGPA
+                  </p>
+                  <p className="text-3xl font-mono font-black text-neutral-950 tabular-nums mt-0.5">
+                    {latestCgpa !== null ? latestCgpa.toFixed(2) : '—'}
+                    <span className="text-xs font-sans font-medium text-neutral-400 ml-1">/ 10</span>
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => navigate('/student/academics')}
+                  className="px-4 py-4 rounded-2xl text-xs font-bold bg-[#FFC20E] text-neutral-950 hover:bg-[#e5ae0b] transition-all shadow-xs flex items-center justify-center gap-1.5 cursor-pointer active:scale-95"
+                  title="View Academic Records"
+                >
+                  <span>Academics</span>
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          </section>
+
+          {/* Quick Metric Bento Grid */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {/* Metric 1: CGPA & Trend */}
+            <div
+              onClick={() => navigate('/student/academics')}
+              className="p-5 rounded-2xl bg-white border border-neutral-200 hover:border-neutral-300 hover:shadow-xs transition-all flex flex-col justify-between cursor-pointer group"
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold uppercase tracking-wider text-neutral-400">
+                  Academic Performance
+                </span>
+                <div className="w-8 h-8 rounded-lg bg-neutral-100 group-hover:bg-[#FFC20E]/20 text-neutral-800 flex items-center justify-center transition-colors">
+                  <TrendingUp className="w-4 h-4" />
+                </div>
+              </div>
+              <div className="mt-3">
+                <p className="text-2xl font-mono font-black text-neutral-950 tabular-nums">
                   {latestCgpa !== null ? latestCgpa.toFixed(2) : '—'}
+                  <span className="text-xs font-normal text-neutral-400 font-sans ml-1">CGPA</span>
                 </p>
+                <div className="flex items-center gap-1.5 text-xs text-neutral-500 mt-1">
+                  <span className="font-medium text-neutral-700">
+                    {activeStudent.cgpaHistory.length} semester(s) recorded
+                  </span>
+                </div>
+              </div>
+              <div className="pt-3 border-t border-neutral-100 flex items-center justify-between text-[11px] font-bold text-neutral-700 group-hover:text-neutral-950">
+                <span>View GPA Progression</span>
+                <ChevronRight className="w-3.5 h-3.5 transition-transform group-hover:translate-x-0.5" />
               </div>
             </div>
 
-            {/* Verified Volunteering Impact Strip */}
-            <div className="space-y-3">
-              <div className="flex items-center justify-between gap-2">
-                <h3 className="text-xs font-bold uppercase tracking-wider text-neutral-400">
-                  Verified Volunteering Counts
-                </h3>
+            {/* Metric 2: Verified Volunteering Sum */}
+            <div
+              onClick={() => navigate('/student/volunteering')}
+              className="p-5 rounded-2xl bg-white border border-neutral-200 hover:border-neutral-300 hover:shadow-xs transition-all flex flex-col justify-between cursor-pointer group"
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold uppercase tracking-wider text-neutral-400">
+                  Volunteering Impact
+                </span>
+                <div className="w-8 h-8 rounded-lg bg-neutral-100 group-hover:bg-blue-50 text-neutral-800 group-hover:text-blue-700 flex items-center justify-center transition-colors">
+                  <Award className="w-4 h-4" />
+                </div>
               </div>
+              <div className="mt-3">
+                <p className="text-2xl font-mono font-black text-neutral-950 tabular-nums">
+                  {totalVolunteering}
+                  <span className="text-xs font-normal text-neutral-400 font-sans ml-1">Activities</span>
+                </p>
+                <p className="text-xs text-neutral-500 mt-1">
+                  100% verified by Anchor & Admin
+                </p>
+              </div>
+              <div className="pt-3 border-t border-neutral-100 flex items-center justify-between text-[11px] font-bold text-neutral-700 group-hover:text-neutral-950">
+                <span>Submit Field Proof</span>
+                <ChevronRight className="w-3.5 h-3.5 transition-transform group-hover:translate-x-0.5" />
+              </div>
+            </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div className="p-4 bg-neutral-950 text-white rounded-xl">
-                  <p className="text-xs text-neutral-400">Tele-verifications</p>
-                  <p className="text-2xl font-mono font-bold mt-1">
+            {/* Metric 3: Placement Status */}
+            <div
+              onClick={() => navigate('/student/placement')}
+              className="p-5 rounded-2xl bg-white border border-neutral-200 hover:border-neutral-300 hover:shadow-xs transition-all flex flex-col justify-between cursor-pointer group"
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold uppercase tracking-wider text-neutral-400">
+                  Career Readiness
+                </span>
+                <div className="w-8 h-8 rounded-lg bg-neutral-100 group-hover:bg-emerald-50 text-neutral-800 group-hover:text-emerald-700 flex items-center justify-center transition-colors">
+                  <Briefcase className="w-4 h-4" />
+                </div>
+              </div>
+              <div className="mt-3">
+                <div className="flex items-center gap-1.5">
+                  <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-bold ${
+                    activeStudent.placementRecord?.offerStatus === 'Offer Received' || activeStudent.placementRecord?.offerStatus === 'Alumni Employed'
+                      ? 'bg-emerald-100 text-emerald-900 border border-emerald-300'
+                      : activeStudent.placementRecord?.offerStatus === 'Interviewing'
+                        ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                        : 'bg-neutral-100 text-neutral-800 border border-neutral-300'
+                  }`}>
+                    {activeStudent.placementRecord?.offerStatus || 'Preparing'}
+                  </span>
+                </div>
+                <p className="text-xs font-semibold text-neutral-800 mt-1 truncate">
+                  {activeStudent.placementRecord?.placedCompany
+                    ? `${activeStudent.placementRecord.placedCompany}${activeStudent.placementRecord.salaryLpa ? ` · ${activeStudent.placementRecord.salaryLpa} LPA` : ''}`
+                    : `${activeStudent.placementRecord?.companiesAttended?.length || 0} Companies Attended`}
+                </p>
+              </div>
+              <div className="pt-3 border-t border-neutral-100 flex items-center justify-between text-[11px] font-bold text-neutral-700 group-hover:text-neutral-950">
+                <span>Placement Tracker</span>
+                <ChevronRight className="w-3.5 h-3.5 transition-transform group-hover:translate-x-0.5" />
+              </div>
+            </div>
+
+            {/* Metric 4: Anchor Cohort & Support */}
+            <div
+              onClick={() => navigate('/student/meetings')}
+              className="p-5 rounded-2xl bg-white border border-neutral-200 hover:border-neutral-300 hover:shadow-xs transition-all flex flex-col justify-between cursor-pointer group"
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold uppercase tracking-wider text-neutral-400">
+                  Cohort & Meetings
+                </span>
+                <div className="w-8 h-8 rounded-lg bg-neutral-100 group-hover:bg-amber-50 text-neutral-800 group-hover:text-amber-700 flex items-center justify-center transition-colors">
+                  <CalendarCheck className="w-4 h-4" />
+                </div>
+              </div>
+              <div className="mt-3">
+                <p className="text-sm font-bold text-neutral-950 truncate">
+                  {scoped.anchorName || 'Assigned Anchor'}
+                </p>
+                <p className="text-xs text-neutral-500 mt-0.5">
+                  {scoped.groupMeetings.length} Gathering(s) Scheduled
+                </p>
+              </div>
+              <div className="pt-3 border-t border-neutral-100 flex items-center justify-between text-[11px] font-bold text-neutral-700 group-hover:text-neutral-950">
+                <span>Meetings & Notices</span>
+                <ChevronRight className="w-3.5 h-3.5 transition-transform group-hover:translate-x-0.5" />
+              </div>
+            </div>
+          </div>
+
+          {/* Verified Volunteering Breakdown Strip */}
+          <section className="bg-white border border-neutral-200 rounded-3xl p-6 sm:p-7 space-y-4 shadow-xs">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-neutral-100 pb-3">
+              <div>
+                <h3 className="font-display text-base font-bold text-neutral-950 flex items-center gap-2">
+                  <span>Verified Volunteering Contributions</span>
+                  <span className="bg-[#FFC20E]/20 text-neutral-950 border border-[#FFC20E]/40 text-[10px] font-mono font-bold px-2 py-0.5 rounded-full">
+                    {totalVolunteering} Total
+                  </span>
+                </h3>
+                <p className="text-xs text-neutral-500 mt-0.5">
+                  Field outreach and verification activities completed for Maatram Foundation.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => navigate('/student/volunteering')}
+                className="px-3.5 py-1.5 rounded-xl text-xs font-bold bg-[#FFC20E] text-neutral-950 hover:bg-[#e5ae0b] transition-colors inline-flex items-center gap-1.5 self-start sm:self-auto cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5 stroke-[3]" />
+                <span>Submit New Proof</span>
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-1">
+              <div className="p-5 rounded-2xl bg-neutral-50/70 border border-neutral-200/80 flex flex-col justify-between space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="w-10 h-10 rounded-xl bg-blue-100 text-blue-900 flex items-center justify-center font-bold">
+                    <PhoneCall className="w-5 h-5" />
+                  </div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-neutral-400 bg-white border border-neutral-200 px-2 py-0.5 rounded-md">
+                    Telephonic
+                  </span>
+                </div>
+                <div>
+                  <p className="text-3xl font-mono font-black text-neutral-950 tabular-nums">
                     {activeStudent.volunteeringCounts.teleVerifications}
                   </p>
-                </div>
-                <div className="p-4 bg-neutral-950 text-white rounded-xl">
-                  <p className="text-xs text-neutral-400">Physical Verifications</p>
-                  <p className="text-2xl font-mono font-bold mt-1">
-                    {activeStudent.volunteeringCounts.physicalVerifications}
+                  <p className="text-xs font-bold text-neutral-900 mt-1">
+                    Tele-verifications
+                  </p>
+                  <p className="text-[11px] text-neutral-500 mt-0.5">
+                    Phone background checks with applicants, teachers, and guardians.
                   </p>
                 </div>
-                <div className="p-4 bg-neutral-950 text-white rounded-xl">
-                  <p className="text-xs text-neutral-400">School Visits</p>
-                  <p className="text-2xl font-mono font-bold mt-1">
+              </div>
+
+              <div className="p-5 rounded-2xl bg-neutral-50/70 border border-neutral-200/80 flex flex-col justify-between space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-900 flex items-center justify-center font-bold">
+                    <MapPin className="w-5 h-5" />
+                  </div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-neutral-400 bg-white border border-neutral-200 px-2 py-0.5 rounded-md">
+                    Field Visit
+                  </span>
+                </div>
+                <div>
+                  <p className="text-3xl font-mono font-black text-neutral-950 tabular-nums">
+                    {activeStudent.volunteeringCounts.physicalVerifications}
+                  </p>
+                  <p className="text-xs font-bold text-neutral-900 mt-1">
+                    Physical Verifications
+                  </p>
+                  <p className="text-[11px] text-neutral-500 mt-0.5">
+                    On-site home and neighborhood validation visits.
+                  </p>
+                </div>
+              </div>
+
+              <div className="p-5 rounded-2xl bg-neutral-50/70 border border-neutral-200/80 flex flex-col justify-between space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-900 flex items-center justify-center font-bold">
+                    <GraduationCap className="w-5 h-5" />
+                  </div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-neutral-400 bg-white border border-neutral-200 px-2 py-0.5 rounded-md">
+                    Outreach
+                  </span>
+                </div>
+                <div>
+                  <p className="text-3xl font-mono font-black text-neutral-950 tabular-nums">
                     {activeStudent.volunteeringCounts.schoolVisits}
+                  </p>
+                  <p className="text-xs font-bold text-neutral-900 mt-1">
+                    School Visits
+                  </p>
+                  <p className="text-[11px] text-neutral-500 mt-0.5">
+                    Motivational higher-secondary school outreach sessions.
                   </p>
                 </div>
               </div>
             </div>
           </section>
+
+          {/* Lower Two-Column Section: Cohort Feed & Achievements Preview */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Left: Latest Cohort Announcements & Gatherings */}
+            <div className="bg-white border border-neutral-200 rounded-3xl p-6 sm:p-7 space-y-4 shadow-xs flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between border-b border-neutral-100 pb-3">
+                  <div className="flex items-center gap-2">
+                    <Megaphone className="w-4 h-4 text-neutral-800" />
+                    <h3 className="font-display text-base font-bold text-neutral-950">
+                      Cohort Announcements
+                    </h3>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => navigate('/student/meetings')}
+                    className="text-xs font-semibold text-neutral-700 hover:text-neutral-950 underline cursor-pointer"
+                  >
+                    View All ({scoped.groupAnnouncements.length})
+                  </button>
+                </div>
+
+                <div className="mt-4 space-y-3">
+                  {scoped.groupAnnouncements.length === 0 ? (
+                    <p className="text-xs text-neutral-500 py-4 text-center">
+                      No cohort announcements posted yet.
+                    </p>
+                  ) : (
+                    scoped.groupAnnouncements.slice(0, 2).map((ann) => (
+                      <div
+                        key={ann.announcementId}
+                        className="p-3.5 rounded-xl bg-neutral-50 border border-neutral-200 space-y-1"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-xs font-bold text-neutral-950 line-clamp-1">
+                            {ann.title}
+                          </p>
+                          <span className="text-[10px] font-mono text-neutral-400 shrink-0">
+                            {format(new Date(ann.postedAt), 'dd MMM')}
+                          </span>
+                        </div>
+                        <p className="text-xs text-neutral-600 line-clamp-2">
+                          {ann.body}
+                        </p>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              {scoped.groupMeetings.length > 0 && (
+                <div className="pt-3 border-t border-neutral-100">
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-neutral-400 mb-2">
+                    Next Upcoming Gathering
+                  </p>
+                  <div className="p-3 rounded-xl bg-amber-50/60 border border-amber-200 flex items-center justify-between gap-3 text-xs">
+                    <div>
+                      <p className="font-bold text-amber-950">
+                        {scoped.groupMeetings[0].title}
+                      </p>
+                      <p className="text-[11px] text-amber-900 mt-0.5">
+                        {format(new Date(scoped.groupMeetings[0].scheduledFor), 'dd MMM yyyy, HH:mm')} · {scoped.groupMeetings[0].locationOrLink}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => navigate('/student/meetings')}
+                      className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-neutral-950 text-white hover:bg-neutral-800 shrink-0 cursor-pointer"
+                    >
+                      Details
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Right: Achievements & Honors */}
+            <div className="bg-white border border-neutral-200 rounded-3xl p-6 sm:p-7 space-y-4 shadow-xs flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between border-b border-neutral-100 pb-3">
+                  <div className="flex items-center gap-2">
+                    <Award className="w-4 h-4 text-neutral-800" />
+                    <h3 className="font-display text-base font-bold text-neutral-950">
+                      Co-Curricular Achievements
+                    </h3>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => navigate('/student/academics')}
+                    className="text-xs font-semibold text-neutral-700 hover:text-neutral-950 underline cursor-pointer"
+                  >
+                    View All ({activeStudent.achievements.length})
+                  </button>
+                </div>
+
+                <div className="mt-4 space-y-3">
+                  {activeStudent.achievements.length === 0 ? (
+                    <p className="text-xs text-neutral-500 py-4 text-center">
+                      No achievements recorded yet. Add your hackathons, papers, or certifications.
+                    </p>
+                  ) : (
+                    activeStudent.achievements.slice(0, 3).map((ach, idx) => (
+                      <div
+                        key={idx}
+                        className="p-3.5 rounded-xl bg-neutral-50 border border-neutral-200 flex items-center justify-between gap-3"
+                      >
+                        <div className="min-w-0">
+                          <p className="text-xs font-bold text-neutral-950 truncate">
+                            {ach.title}
+                          </p>
+                          <p className="text-[11px] text-neutral-500">
+                            {ach.category} · {ach.date}
+                          </p>
+                        </div>
+                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-[#FFC20E]/20 text-neutral-900 border border-[#FFC20E]/40 shrink-0">
+                          Verified
+                        </span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              <div className="pt-3 border-t border-neutral-100 flex items-center justify-between">
+                <span className="text-xs text-neutral-500">
+                  Have an accomplishment to share?
+                </span>
+                <button
+                  type="button"
+                  onClick={() => navigate('/student/academics')}
+                  className="px-3 py-1.5 rounded-xl text-xs font-bold bg-neutral-950 text-white hover:bg-neutral-800 transition-colors inline-flex items-center gap-1 cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Add Achievement</span>
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
