@@ -108,7 +108,6 @@ export function getSidebarItemsForRole(role: UserRole): SidebarNavItem[] {
         { id: 'sampled', path: '/admin/sampled', label: 'Sampled requests', group: 'Operations' },
         { id: 'alumni', path: '/admin/alumni', label: 'Alumni career tracker', group: 'People' },
         { id: 'events', path: '/admin/events', label: 'Audit and Event Log', group: 'System' },
-        { id: 'settings', path: '/admin/settings', label: 'Settings', group: 'System' },
       ];
   }
 }

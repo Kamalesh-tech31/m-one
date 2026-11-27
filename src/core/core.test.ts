@@ -522,7 +522,6 @@ describe('Maatram One Role Auth, Route Guard & Scoping', () => {
       'Sampled requests',
       'Alumni career tracker',
       'Audit and Event Log',
-      'Settings',
     ]);
     expect(adminItems.map((i) => i.path)).toEqual([
       '/admin/applicants',
@@ -531,8 +530,8 @@ describe('Maatram One Role Auth, Route Guard & Scoping', () => {
       '/admin/sampled',
       '/admin/alumni',
       '/admin/events',
-      '/admin/settings',
     ]);
+    expect(adminItems.some((i) => i.label.toLowerCase().includes('setting'))).toBe(false);
   });
 
   it('verifies demo credentials, rejects wrong passwords, and blocks cross-portal login attempts', () => {

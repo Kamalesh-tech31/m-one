@@ -11,7 +11,6 @@ import {
   KeyRound,
   Lock,
   MapPin,
-  Settings,
   ShieldAlert,
   Users,
   X,
@@ -99,22 +98,6 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
     'Submit verified volunteering count summary for sampled cohort.'
   );
   const [sampleDeadline, setSampleDeadline] = useState('2026-12-10');
-
-  // Admin Settings: Anchor Yearly Renewal Fee & Roster Cap
-  const [feeSettingInput, setFeeSettingInput] = useState(
-    String(scoped.anchorFeeAmount)
-  );
-  const [capSettingInput, setCapSettingInput] = useState(
-    String(scoped.rosterCap)
-  );
-
-  useEffect(() => {
-    setFeeSettingInput(String(scoped.anchorFeeAmount));
-  }, [scoped.anchorFeeAmount]);
-
-  useEffect(() => {
-    setCapSettingInput(String(scoped.rosterCap));
-  }, [scoped.rosterCap]);
 
   const [toastMsg, setToastMsg] = useState('');
 
@@ -418,32 +401,6 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
       },
     });
     setToastMsg(`Sampled request dispatched to ${sampled.length} scholar(s).`);
-  };
-
-  const handleSaveFeeSetting = (e: React.FormEvent) => {
-    e.preventDefault();
-    const amount = Math.max(0, Number(feeSettingInput) || 1000);
-    onAppend({
-      type: 'ANCHOR_FEE_UPDATED',
-      personId: 'SYSTEM',
-      cycleId: '2026',
-      actor: actorName,
-      payload: { amount },
-    });
-    setToastMsg(`Anchor renewal fee set to Rs ${amount.toLocaleString()}.`);
-  };
-
-  const handleSaveCapSetting = (e: React.FormEvent) => {
-    e.preventDefault();
-    const cap = Math.max(1, Number(capSettingInput) || 15);
-    onAppend({
-      type: 'ROSTER_CAP_UPDATED',
-      personId: 'SYSTEM',
-      cycleId: '2026',
-      actor: actorName,
-      payload: { cap },
-    });
-    setToastMsg(`Anchor roster cap updated to ${cap} scholars.`);
   };
 
   // If sub-route is alumni or events, render those specialized screens directly
@@ -1562,104 +1519,6 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({
                 </div>
               </section>
             )}
-          </div>
-        </div>
-      )}
-
-      {/* 6. SETTINGS TAB (Fee and roster cap only — No reset demo) */}
-      {activeTab === 'settings' && (
-        <div className="space-y-6">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-neutral-200 pb-5">
-            <div>
-              <h1 className="font-display text-2xl sm:text-3xl font-extrabold text-neutral-950 tracking-[-0.02em]">
-                Settings
-              </h1>
-              <p className="text-sm text-neutral-600 mt-1">
-                Configure anchor renewal fee and cohort roster limits.
-              </p>
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => onOtpVerify(false)}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium border border-neutral-950 bg-white text-neutral-950 hover:bg-neutral-50"
-              >
-                <Lock className="w-3.5 h-3.5" aria-hidden="true" />
-                <span>Lock Admin</span>
-              </button>
-            </div>
-          </div>
-
-          <div className="max-w-2xl bg-white border border-neutral-200 rounded-2xl p-6 space-y-6 shadow-xs">
-            <div className="flex items-center justify-between border-b border-neutral-200 pb-3">
-              <div className="flex items-center gap-2">
-                <Settings className="w-4 h-4 text-neutral-950" aria-hidden="true" />
-                <h2 className="font-display text-base font-bold text-neutral-950">
-                  Cohort & Anchor Parameters
-                </h2>
-              </div>
-              <span className="bg-neutral-950 text-white rounded-full px-2.5 py-0.5 text-xs font-mono font-semibold tabular-nums">
-                Fee: Rs {scoped.anchorFeeAmount.toLocaleString()} · Cap: {scoped.rosterCap} scholars
-              </span>
-            </div>
-
-            <form onSubmit={handleSaveFeeSetting} className="space-y-2">
-              <label
-                htmlFor="admin-anchor-fee"
-                className="block text-xs font-semibold text-neutral-800"
-              >
-                Anchor Yearly Renewal Fee (Rs)
-              </label>
-              <div className="flex items-center gap-2">
-                <input
-                  id="admin-anchor-fee"
-                  type="number"
-                  min="0"
-                  step="50"
-                  value={feeSettingInput}
-                  onChange={(e) => setFeeSettingInput(e.target.value)}
-                  className="w-44 border border-neutral-300 rounded-lg px-3 py-2 text-sm font-mono tabular-nums focus:outline-none focus:ring-2 focus:ring-neutral-950"
-                />
-                <button
-                  type="submit"
-                  className="px-4 py-2 rounded-xl text-xs font-semibold bg-[#FFC20E] text-neutral-950 hover:bg-[#e5ae0b]"
-                >
-                  Save Fee
-                </button>
-              </div>
-              <p className="text-xs text-neutral-500">
-                Determines the renewal fee displayed on the anchor portal fee invoice.
-              </p>
-            </form>
-
-            <form onSubmit={handleSaveCapSetting} className="space-y-2 pt-4 border-t border-neutral-100">
-              <label
-                htmlFor="admin-roster-cap"
-                className="block text-xs font-semibold text-neutral-800"
-              >
-                Anchor Cohort Roster Cap (Scholars per Anchor)
-              </label>
-              <div className="flex items-center gap-2">
-                <input
-                  id="admin-roster-cap"
-                  type="number"
-                  min="1"
-                  max="50"
-                  value={capSettingInput}
-                  onChange={(e) => setCapSettingInput(e.target.value)}
-                  className="w-44 border border-neutral-300 rounded-lg px-3 py-2 text-sm font-mono tabular-nums focus:outline-none focus:ring-2 focus:ring-neutral-950"
-                />
-                <button
-                  type="submit"
-                  className="px-4 py-2 rounded-xl text-xs font-semibold bg-neutral-950 text-white hover:bg-neutral-800"
-                >
-                  Save Cap
-                </button>
-              </div>
-              <p className="text-xs text-neutral-500">
-                Maximum number of active scholars assigned to a single anchor.
-              </p>
-            </form>
           </div>
         </div>
       )}

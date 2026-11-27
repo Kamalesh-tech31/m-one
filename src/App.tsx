@@ -200,6 +200,7 @@ function AdminViewWrapper({
 }) {
   const { tab } = useParams<{ tab?: string }>();
   if (!scopedData) return null;
+  const effectiveTab = tab === 'settings' ? 'applicants' : (tab || 'applicants');
   return (
     <AdminScreen
       scoped={scopedData}
@@ -207,7 +208,7 @@ function AdminViewWrapper({
       onAppend={append}
       otpVerified={adminOtpVerified}
       onOtpVerify={setAdminOtpVerified}
-      activeTab={tab || 'applicants'}
+      activeTab={effectiveTab}
       onReplayFromStart={replayStart}
       onReplayFromTime={replayTime}
       onReplayFromBookmark={replayBookmark}

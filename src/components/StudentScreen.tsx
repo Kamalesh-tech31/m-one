@@ -12,7 +12,6 @@ import {
   Flag,
   GraduationCap,
   Inbox,
-  Lock,
   MapPin,
   Megaphone,
   Plus,
@@ -468,18 +467,15 @@ export const StudentScreen: React.FC<StudentScreenProps> = ({
               </div>
             </div>
 
-            {/* Verified Volunteering Impact Strip (with "Synced from Volunteer Portal" label) */}
+            {/* Verified Volunteering Impact Strip */}
             <div className="space-y-3">
               <div className="flex items-center justify-between gap-2">
                 <h3 className="text-xs font-bold uppercase tracking-wider text-neutral-400">
                   Verified Volunteering Counts
                 </h3>
-                <span className="text-[11px] font-semibold text-neutral-500 italic">
-                  Synced from Volunteer Portal
-                </span>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div className="p-4 bg-neutral-950 text-white rounded-xl">
                   <p className="text-xs text-neutral-400">Tele-verifications</p>
                   <p className="text-2xl font-mono font-bold mt-1">
@@ -497,13 +493,6 @@ export const StudentScreen: React.FC<StudentScreenProps> = ({
                   <p className="text-2xl font-mono font-bold mt-1">
                     {activeStudent.volunteeringCounts.schoolVisits}
                   </p>
-                </div>
-                <div className="p-4 border border-dashed border-neutral-300 rounded-xl bg-neutral-50 text-neutral-500 flex flex-col justify-between">
-                  <div className="flex items-center justify-between text-xs font-semibold text-neutral-700">
-                    <span>NGO Teaching</span>
-                    <Lock className="w-3.5 h-3.5 text-neutral-400" />
-                  </div>
-                  <p className="text-xs text-neutral-500 mt-2">Coming soon</p>
                 </div>
               </div>
             </div>
